@@ -1,0 +1,55 @@
+{
+  "name": "@askill/cli",
+  "version": "0.1.0",
+  "description": "askill - The Agent Skill Package Manager",
+  "type": "module",
+  "bin": {
+    "askill": "./dist/cli.mjs"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "dev": "npx tsx src/cli.ts",
+    "build": "npx esbuild src/cli.ts --bundle --platform=node --format=esm --outfile=dist/cli.mjs --external:@clack/prompts --external:picocolors --external:semver",
+    "build:bun": "bun build ./src/cli.ts --outfile ./dist/cli.mjs --target node",
+    "build:binary": "bun build ./src/cli.ts --compile --outfile ./dist/askill",
+    "build:all": "npm run build && npm run build:binary",
+    "test": "npx tsx --test src/**/*.test.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "cli",
+    "skills",
+    "ai-agents",
+    "skill-package-manager",
+    "askill",
+    "claude-code",
+    "cursor",
+    "windsurf",
+    "opencode",
+    "agent"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/anthropics/askill.git"
+  },
+  "homepage": "https://askill.sh",
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^22.10.0",
+    "esbuild": "^0.27.2",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@clack/prompts": "^0.11.0",
+    "picocolors": "^1.1.1",
+    "semver": "^7.6.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
