@@ -1,12 +1,8 @@
-# Vercel
-.vercel
-
 # Dependencies
 node_modules/
 
 # Build outputs
 dist/
-.next/
 
 # Environment
 .env
@@ -27,6 +23,8 @@ Thumbs.db
 *.log
 npm-debug.log*
 
-# Separate projects (have their own git repos)
-dashboard/
+# Vercel
+.vercel/
+
+# Other projects in parent directory
 npx-architecture/
