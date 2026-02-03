@@ -1,4 +1,4 @@
-// Auto-updater module for SPM CLI
+// Auto-updater module for askill CLI
 
 import { existsSync, createWriteStream, unlinkSync, chmodSync, renameSync } from 'fs';
 import { join, dirname } from 'path';
@@ -8,7 +8,7 @@ import { Readable } from 'stream';
 import semver from 'semver';
 import { VERSION, CYAN, GREEN, YELLOW, RED, RESET, DIM } from './constants.ts';
 
-const UPDATE_CHECK_FILE = join(homedir(), '.spm', 'last-update-check');
+const UPDATE_CHECK_FILE = join(homedir(), '.askill', 'last-update-check');
 const UPDATE_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 interface VersionInfo {
@@ -69,7 +69,7 @@ async function saveUpdateCheckTime(): Promise<void> {
 async function fetchVersionInfo(): Promise<VersionInfo | null> {
   try {
     const response = await fetch('https://askill.sh/api/v1/cli/version', {
-      headers: { 'User-Agent': `spm/${VERSION}` },
+      headers: { 'User-Agent': `askill/${VERSION}` },
     });
 
     if (!response.ok) return null;
@@ -99,14 +99,14 @@ export async function checkForUpdates(force: boolean = false): Promise<void> {
     console.log();
     console.log(`${YELLOW}╭───────────────────────────────────────────╮${RESET}`);
     console.log(`${YELLOW}│${RESET}  Update available: ${DIM}${current}${RESET} → ${GREEN}${latest}${RESET}        ${YELLOW}│${RESET}`);
-    console.log(`${YELLOW}│${RESET}  Run ${CYAN}spm update${RESET} to update               ${YELLOW}│${RESET}`);
+    console.log(`${YELLOW}│${RESET}  Run ${CYAN}askill update${RESET} to update               ${YELLOW}│${RESET}`);
     console.log(`${YELLOW}╰───────────────────────────────────────────╯${RESET}`);
     console.log();
   }
 
   // Check minimum version requirement
   if (semver.lt(current, versionInfo.minimum)) {
-    console.log(`${RED}Your SPM version is too old. Please update to continue.${RESET}`);
+    console.log(`${RED}Your askill version is too old. Please update to continue.${RESET}`);
     console.log(`Minimum required: ${versionInfo.minimum}`);
     process.exit(1);
   }
@@ -139,7 +139,7 @@ export async function selfUpdate(): Promise<boolean> {
 
   if (!downloadUrl) {
     console.log(`${RED}No download available for your platform (${platformKey})${RESET}`);
-    console.log(`Please update manually: npm install -g spm@latest`);
+    console.log(`Please update manually: npm install -g askill@latest`);
     return false;
   }
 
@@ -151,7 +151,7 @@ export async function selfUpdate(): Promise<boolean> {
     if (isNodeProcess) {
       // Running via node/bun - suggest npm update
       console.log(`${YELLOW}Running via Node.js runtime${RESET}`);
-      console.log(`Please update using: ${CYAN}npm install -g spm@latest${RESET}`);
+      console.log(`Please update using: ${CYAN}npm install -g askill@latest${RESET}`);
       return false;
     }
 
@@ -193,7 +193,7 @@ export async function selfUpdate(): Promise<boolean> {
     return true;
   } catch (error) {
     console.log(`${RED}Update failed: ${error instanceof Error ? error.message : 'Unknown error'}${RESET}`);
-    console.log(`Please update manually: npm install -g spm@latest`);
+    console.log(`Please update manually: npm install -g askill@latest`);
     return false;
   }
 }

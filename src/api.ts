@@ -91,7 +91,7 @@ class APIClient {
       ...options,
       headers: {
         'Content-Type': 'application/json',
-        'User-Agent': 'spm-cli',
+        'User-Agent': 'askill-cli',
         ...options?.headers,
       },
     });
@@ -161,7 +161,7 @@ class APIClient {
   async getSkillRaw(slug: string): Promise<string> {
     const url = `${this.baseUrl}/skills/${encodeURIComponent(slug)}/raw`;
     const response = await fetch(url, {
-      headers: { 'User-Agent': 'spm-cli' },
+      headers: { 'User-Agent': 'askill-cli' },
     });
 
     if (!response.ok) {

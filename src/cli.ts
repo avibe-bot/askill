@@ -60,9 +60,9 @@ ${BOLD}Commands:${RESET}
   run <skill:cmd>       Run a skill command
   update                Update askill CLI
 
-${BOLD}Skill Slug Formats:${RESET}
-  @scope/name                       Published skill
-  gh:owner/repo/path                Indexed from GitHub
+${BOLD}Skill Slug Formats (Indexed from GitHub):${RESET}
+  gh:owner/repo@name                  Short format (if name unique in repo)
+  gh:owner/repo/path                  Full path format
 
 ${BOLD}Install Options:${RESET}
   -g, --global          Install globally (user-level)
@@ -78,12 +78,11 @@ ${BOLD}Options:${RESET}
   --version, -v         Show version number
 
 ${BOLD}Examples:${RESET}
-  ${DIM}$${RESET} askill install @anthropic/memory
+  ${DIM}$${RESET} askill install gh:facebook/react@extract-errors
   ${DIM}$${RESET} askill install gh:facebook/react/scripts/errors
   ${DIM}$${RESET} askill search memory
-  ${DIM}$${RESET} askill run @anthropic/memory:save --key foo --value bar
   ${DIM}$${RESET} askill list -g
-  ${DIM}$${RESET} askill info @anthropic/memory
+  ${DIM}$${RESET} askill info gh:facebook/react@extract-errors
 
 ${DIM}Browse more at${RESET} ${CYAN}https://askill.sh${RESET}
 `);
@@ -95,44 +94,62 @@ ${DIM}Browse more at${RESET} ${CYAN}https://askill.sh${RESET}
 
 /**
  * Parse skill identifier to determine the format:
- * - "extract-errors" -> { type: 'short', name: 'extract-errors' }
- * - "facebook/react" -> { type: 'repo', owner: 'facebook', repo: 'react' }
- * - "facebook/react@extract-errors" -> { type: 'at', owner: 'facebook', repo: 'react', skill: 'extract-errors' }
- * - "facebook/react/scripts/errors" -> { type: 'full', slug: 'facebook/react/scripts/errors' }
+ * 
+ * Indexed from GitHub (gh: prefix):
+ * - "gh:owner/repo@name" -> { type: 'gh-at', owner, repo, skill }
+ * - "gh:owner/repo/path" -> { type: 'gh-path', owner, repo, path }
+ * - "gh:owner/repo"      -> { type: 'gh-repo', owner, repo }
+ * 
+ * Legacy formats (without gh: prefix, for backward compatibility):
+ * - "owner/repo@name"    -> { type: 'gh-at', owner, repo, skill }
+ * - "owner/repo/path"    -> { type: 'gh-path', owner, repo, path }
+ * - "owner/repo"         -> { type: 'gh-repo', owner, repo }
  */
 interface SkillIdentifier {
-  type: 'short' | 'repo' | 'at' | 'full';
-  name?: string;
-  owner?: string;
-  repo?: string;
-  skill?: string;
-  slug?: string;
+  type: 'gh-at' | 'gh-path' | 'gh-repo';
+  owner: string;
+  repo: string;
+  skill?: string;  // For gh:owner/repo@skill format
+  path?: string;   // For gh:owner/repo/path format
 }
 
 function parseSkillIdentifier(input: string): SkillIdentifier {
+  // Remove gh: prefix if present
+  const normalized = input.startsWith('gh:') ? input.slice(3) : input;
+
   // Check for @ format: owner/repo@skill-name
-  if (input.includes('@')) {
-    const [repoPath, skillName] = input.split('@');
+  if (normalized.includes('@')) {
+    const [repoPath, skillName] = normalized.split('@');
     const parts = repoPath.split('/');
-    if (parts.length === 2) {
-      return { type: 'at', owner: parts[0], repo: parts[1], skill: skillName };
+    if (parts.length >= 2) {
+      return { 
+        type: 'gh-at', 
+        owner: parts[0], 
+        repo: parts[1], 
+        skill: skillName 
+      };
     }
   }
 
-  const parts = input.split('/');
-
-  // Single part: short name
-  if (parts.length === 1) {
-    return { type: 'short', name: input };
-  }
+  const parts = normalized.split('/');
 
   // Two parts: owner/repo
   if (parts.length === 2) {
-    return { type: 'repo', owner: parts[0], repo: parts[1] };
+    return { type: 'gh-repo', owner: parts[0], repo: parts[1] };
   }
 
-  // Three or more parts: full path (owner/repo/path...)
-  return { type: 'full', slug: input, owner: parts[0], repo: parts[1] };
+  // Three or more parts: owner/repo/path...
+  if (parts.length >= 3) {
+    return { 
+      type: 'gh-path', 
+      owner: parts[0], 
+      repo: parts[1],
+      path: parts.slice(2).join('/')
+    };
+  }
+
+  // Fallback: treat as repo (shouldn't happen with valid input)
+  return { type: 'gh-repo', owner: parts[0] || '', repo: parts[1] || '' };
 }
 
 interface InstallOptions {
@@ -174,16 +191,16 @@ async function runInstall(args: string[]): Promise<void> {
 
   if (!skillName) {
     console.log(`${RED}Error: Missing skill identifier${RESET}`);
-    console.log(`Usage: spm install <skill>`);
+    console.log(`Usage: askill install <skill>`);
     console.log(`\nFormats supported:`);
-    console.log(`  spm install extract-errors               ${DIM}# short name${RESET}`);
-    console.log(`  spm install facebook/react               ${DIM}# list repo skills${RESET}`);
-    console.log(`  spm install facebook/react@extract-errors  ${DIM}# specific skill${RESET}`);
+    console.log(`  askill install gh:facebook/react@extract-errors  ${DIM}# short format${RESET}`);
+    console.log(`  askill install gh:facebook/react/scripts/errors  ${DIM}# full path${RESET}`);
+    console.log(`  askill install gh:facebook/react                 ${DIM}# list repo skills${RESET}`);
     process.exit(1);
   }
 
   console.log();
-  p.intro(pc.bgCyan(pc.black(' spm install ')));
+  p.intro(pc.bgCyan(pc.black(' askill install ')));
 
   const spinner = p.spinner();
   const identifier = parseSkillIdentifier(skillName);
@@ -191,12 +208,12 @@ async function runInstall(args: string[]): Promise<void> {
   let skillsToInstall: Array<{ slug: string; name: string; description: string }> = [];
 
   // Handle different identifier types
-  if (identifier.type === 'repo') {
+  if (identifier.type === 'gh-repo') {
     // List all skills in repo and let user select
     spinner.start(`Fetching skills from ${identifier.owner}/${identifier.repo}...`);
 
     try {
-      const repoData = await api.getRepoSkills(identifier.owner!, identifier.repo!);
+      const repoData = await api.getRepoSkills(identifier.owner, identifier.repo);
       spinner.stop(`Found ${repoData.skills.length} skill(s) in ${pc.cyan(`${identifier.owner}/${identifier.repo}`)}`);
 
       if (repoData.skills.length === 0) {
@@ -248,15 +265,14 @@ async function runInstall(args: string[]): Promise<void> {
       throw error;
     }
   } else {
-    // Short name, @ format, or full path - resolve to single skill
+    // gh-at or gh-path format - resolve to single skill
     let slug: string;
 
-    if (identifier.type === 'at') {
+    if (identifier.type === 'gh-at') {
       slug = `${identifier.owner}/${identifier.repo}@${identifier.skill}`;
-    } else if (identifier.type === 'full') {
-      slug = identifier.slug!;
     } else {
-      slug = identifier.name!;
+      // gh-path format
+      slug = `${identifier.owner}/${identifier.repo}/${identifier.path}`;
     }
 
     spinner.start(`Fetching skill: ${slug}...`);
@@ -466,7 +482,7 @@ async function runSearch(args: string[]): Promise<void> {
   const query = args.join(' ');
 
   console.log();
-  p.intro(pc.bgCyan(pc.black(' spm search ')));
+  p.intro(pc.bgCyan(pc.black(' askill search ')));
 
   const spinner = p.spinner();
   spinner.start(query ? `Searching for "${query}"...` : 'Loading skills...');
@@ -495,11 +511,11 @@ async function runSearch(args: string[]): Promise<void> {
       if (description) {
         console.log(`  ${pc.dim(description.slice(0, 80))}${description.length > 80 ? '...' : ''}`);
       }
-      // Build install command
+      // Build install command - use gh: prefix
       const installCmd = skill.owner && skill.repo
-        ? `${skill.owner}/${skill.repo}@${displayName}`
-        : displayName;
-      console.log(`  ${pc.dim('spm install')} ${installCmd}`);
+        ? `gh:${skill.owner}/${skill.repo}@${displayName}`
+        : `gh:${displayName}`;
+      console.log(`  ${pc.dim('askill install')} ${installCmd}`);
       console.log();
     }
 
@@ -521,7 +537,7 @@ async function runList(args: string[]): Promise<void> {
   const isGlobal = args.includes('-g') || args.includes('--global');
 
   console.log();
-  p.intro(pc.bgCyan(pc.black(' spm list ')));
+  p.intro(pc.bgCyan(pc.black(' askill list ')));
 
   const spinner = p.spinner();
   spinner.start('Loading installed skills...');
@@ -531,7 +547,7 @@ async function runList(args: string[]): Promise<void> {
 
   if (skills.length === 0) {
     p.log.info('No skills installed');
-    p.outro(`Install skills with ${pc.cyan('spm install <skill>')}`);
+    p.outro(`Install skills with ${pc.cyan('askill install <skill>')}`);
     return;
   }
 
@@ -559,12 +575,12 @@ async function runRemove(args: string[]): Promise<void> {
 
   if (!skillName) {
     console.log(`${RED}Error: Missing skill name${RESET}`);
-    console.log(`Usage: spm remove <skill-name>`);
+    console.log(`Usage: askill remove <skill-name>`);
     process.exit(1);
   }
 
   console.log();
-  p.intro(pc.bgCyan(pc.black(' spm remove ')));
+  p.intro(pc.bgCyan(pc.black(' askill remove ')));
 
   const spinner = p.spinner();
   spinner.start('Detecting agents...');
@@ -615,12 +631,12 @@ async function runInfo(args: string[]): Promise<void> {
 
   if (!skillName) {
     console.log(`${RED}Error: Missing skill name${RESET}`);
-    console.log(`Usage: spm info <skill-name>`);
+    console.log(`Usage: askill info <skill-name>`);
     process.exit(1);
   }
 
   console.log();
-  p.intro(pc.bgCyan(pc.black(' spm info ')));
+  p.intro(pc.bgCyan(pc.black(' askill info ')));
 
   const spinner = p.spinner();
   spinner.start(`Fetching ${skillName}...`);
@@ -661,7 +677,7 @@ async function runInfo(args: string[]): Promise<void> {
     const installCmd = skill.owner && skill.repo
       ? `${skill.owner}/${skill.repo}@${displayName}`
       : displayName;
-    console.log(`  ${pc.dim('Install:')}    ${pc.cyan(`spm install ${installCmd}`)}`);
+    console.log(`  ${pc.dim('Install:')}    ${pc.cyan(`askill install gh:${installCmd}`)}`);
     console.log();
 
     p.outro('');
@@ -741,7 +757,7 @@ async function main(): Promise<void> {
 
     default:
       console.log(`${RED}Unknown command: ${command}${RESET}`);
-      console.log(`Run ${CYAN}spm --help${RESET} for usage.`);
+      console.log(`Run ${CYAN}askill --help${RESET} for usage.`);
       process.exit(1);
   }
 }
