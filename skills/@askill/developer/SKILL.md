@@ -57,7 +57,7 @@ askill validate SKILL.md
 ### 4. Test Locally
 
 ```bash
-askill install ./my-skill --agent claude-code
+askill add ./my-skill --agent claude-code
 ```
 
 ### 5. Publish
@@ -315,7 +315,7 @@ When you need to get the current branch, refer to the
 
 ```bash
 # Install locally
-askill install ./my-skill
+askill add ./my-skill
 
 # Test commands
 askill run my-skill:command-name
@@ -356,7 +356,7 @@ askill publish
 ```
 
 Your skill will be available at:
-- Install: `askill install @yourusername/my-skill`
+- Install: `askill add @yourusername/my-skill`
 - Web: `https://askill.sh/@yourusername/my-skill`
 
 ### Updates

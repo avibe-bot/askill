@@ -37,8 +37,8 @@ function showBanner(): void {
   console.log();
   console.log(`${DIM}The Agent Skill Package Manager${RESET}`);
   console.log();
-  console.log(`  ${DIM}$${RESET} askill install ${DIM}<skill>${RESET}   ${DIM}Install a skill${RESET}`);
-  console.log(`  ${DIM}$${RESET} askill search ${DIM}[query]${RESET}   ${DIM}Search for skills${RESET}`);
+  console.log(`  ${DIM}$${RESET} askill add ${DIM}<skill>${RESET}       ${DIM}Install a skill${RESET}`);
+  console.log(`  ${DIM}$${RESET} askill find ${DIM}[query]${RESET}      ${DIM}Search for skills${RESET}`);
   console.log(`  ${DIM}$${RESET} askill list${RESET}              ${DIM}List installed skills${RESET}`);
   console.log(`  ${DIM}$${RESET} askill remove ${DIM}<skill>${RESET}   ${DIM}Remove a skill${RESET}`);
   console.log(`  ${DIM}$${RESET} askill run ${DIM}<skill:cmd>${RESET}  ${DIM}Run a skill command${RESET}`);
@@ -52,10 +52,10 @@ function showHelp(): void {
 ${BOLD}Usage:${RESET} askill <command> [options]
 
 ${BOLD}Commands:${RESET}
-  install, i <skill>    Install a skill from askill.sh
-  remove, rm <skill>    Remove an installed skill
-  list, ls              List installed skills
-  search, s [query]     Search for skills
+  add, install, i <skill>  Install a skill from askill.sh
+  remove, rm <skill>       Remove an installed skill
+  list, ls                 List installed skills
+  find, search, s [query]  Search for skills
   info <skill>          Show skill details
   run <skill:cmd>       Run a skill command
   update                Update askill CLI
@@ -78,9 +78,9 @@ ${BOLD}Options:${RESET}
   --version, -v         Show version number
 
 ${BOLD}Examples:${RESET}
-  ${DIM}$${RESET} askill install gh:facebook/react@extract-errors
-  ${DIM}$${RESET} askill install gh:facebook/react/scripts/errors
-  ${DIM}$${RESET} askill search memory
+  ${DIM}$${RESET} askill add gh:facebook/react@extract-errors
+  ${DIM}$${RESET} askill add gh:facebook/react/scripts/errors
+  ${DIM}$${RESET} askill find memory
   ${DIM}$${RESET} askill list -g
   ${DIM}$${RESET} askill info gh:facebook/react@extract-errors
 
@@ -191,11 +191,11 @@ async function runInstall(args: string[]): Promise<void> {
 
   if (!skillName) {
     console.log(`${RED}Error: Missing skill identifier${RESET}`);
-    console.log(`Usage: askill install <skill>`);
+    console.log(`Usage: askill add <skill>`);
     console.log(`\nFormats supported:`);
-    console.log(`  askill install gh:facebook/react@extract-errors  ${DIM}# short format${RESET}`);
-    console.log(`  askill install gh:facebook/react/scripts/errors  ${DIM}# full path${RESET}`);
-    console.log(`  askill install gh:facebook/react                 ${DIM}# list repo skills${RESET}`);
+    console.log(`  askill add gh:facebook/react@extract-errors  ${DIM}# short format${RESET}`);
+    console.log(`  askill add gh:facebook/react/scripts/errors  ${DIM}# full path${RESET}`);
+    console.log(`  askill add gh:facebook/react                 ${DIM}# list repo skills${RESET}`);
     process.exit(1);
   }
 
@@ -515,7 +515,7 @@ async function runSearch(args: string[]): Promise<void> {
       const installCmd = skill.owner && skill.repo
         ? `gh:${skill.owner}/${skill.repo}@${displayName}`
         : `gh:${displayName}`;
-      console.log(`  ${pc.dim('askill install')} ${installCmd}`);
+      console.log(`  ${pc.dim('askill add')} ${installCmd}`);
       console.log();
     }
 
@@ -547,7 +547,7 @@ async function runList(args: string[]): Promise<void> {
 
   if (skills.length === 0) {
     p.log.info('No skills installed');
-    p.outro(`Install skills with ${pc.cyan('askill install <skill>')}`);
+    p.outro(`Install skills with ${pc.cyan('askill add <skill>')}`);
     return;
   }
 

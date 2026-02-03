@@ -16,10 +16,10 @@ npx @askill/cli <command>
 
 | Command | Description |
 |---------|-------------|
-| `askill install` | Install a skill |
+| `askill add` | Install a skill |
 | `askill remove` | Remove a skill |
 | `askill list` | List installed skills |
-| `askill search` | Search for skills |
+| `askill find` | Search for skills |
 | `askill info` | Show skill details |
 | `askill run` | Run a skill command |
 | `askill update` | Update skills |
@@ -29,14 +29,14 @@ npx @askill/cli <command>
 
 ---
 
-## askill install
+## askill add
 
 Install a skill from the registry or GitHub.
 
 ### Usage
 
 ```bash
-askill install <slug> [options]
+askill add <slug> [options]
 ```
 
 ### Arguments
@@ -58,22 +58,22 @@ askill install <slug> [options]
 
 ```bash
 # Install a published skill
-askill install @anthropic/memory
+askill add @anthropic/memory
 
 # Install from GitHub
-askill install gh:facebook/react/scripts/error-codes
+askill add gh:facebook/react/scripts/error-codes
 
 # Install with specific version
-askill install @anthropic/memory@^1.0.0
+askill add @anthropic/memory@^1.0.0
 
 # Install globally
-askill install @anthropic/memory -g
+askill add @anthropic/memory -g
 
 # Install to specific agents
-askill install @anthropic/memory --agent claude-code cursor
+askill add @anthropic/memory --agent claude-code cursor
 
 # Non-interactive install
-askill install @anthropic/memory -y
+askill add @anthropic/memory -y
 ```
 
 ---
@@ -153,14 +153,14 @@ Installed skills:
 
 ---
 
-## askill search
+## askill find
 
 Search for skills on askill.sh.
 
 ### Usage
 
 ```bash
-askill search [query] [options]
+askill find [query] [options]
 ```
 
 ### Options
@@ -175,16 +175,16 @@ askill search [query] [options]
 
 ```bash
 # Browse popular skills
-askill search
+askill find
 
 # Search by keyword
-askill search memory
+askill find memory
 
 # Filter by tag
-askill search --tag git
+askill find --tag git
 
 # Combine filters
-askill search code review --tag quality
+askill find code review --tag quality
 ```
 
 ---
@@ -230,7 +230,7 @@ askill info @anthropic/memory
     list     - List all saved keys
 
   Install:
-    askill install @anthropic/memory
+    askill add @anthropic/memory
 ```
 
 ---

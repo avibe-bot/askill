@@ -126,7 +126,7 @@ skills:
 These are automatically installed by askill. If a dependency is missing, suggest:
 
 ```bash
-askill install <skill-slug>
+askill add <skill-slug>
 ```
 
 ## Best Practices
@@ -175,7 +175,7 @@ askill run @scope/skillname:_setup
 
 The skill might not be installed:
 ```bash
-askill install @scope/skillname
+askill add @scope/skillname
 ```
 
 ### "Permission denied"

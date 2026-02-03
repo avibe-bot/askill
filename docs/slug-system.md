@@ -111,7 +111,7 @@ However, we recommend always using the `gh:` prefix to clearly indicate these ar
 
 ## Resolution Rules
 
-When you run `askill install <slug>`:
+When you run `askill add <slug>`:
 
 ```
 1. If starts with @     → Look up in registry (published skill)
@@ -124,13 +124,13 @@ When you run `askill install <slug>`:
 
 ```bash
 # Published skills support semver
-askill install @anthropic/memory@^1.0.0    # Latest 1.x.x
-askill install @anthropic/memory@~1.2.0    # Latest 1.2.x
-askill install @anthropic/memory@1.2.3     # Exact version
+askill add @anthropic/memory@^1.0.0    # Latest 1.x.x
+askill add @anthropic/memory@~1.2.0    # Latest 1.2.x
+askill add @anthropic/memory@1.2.3     # Exact version
 
 # Indexed skills - both formats work the same
-askill install gh:owner/repo@skill-name    # Default branch, short format
-askill install gh:owner/repo/path          # Default branch, full path
+askill add gh:owner/repo@skill-name    # Default branch, short format
+askill add gh:owner/repo/path          # Default branch, full path
 ```
 
 Note: For indexed skills, the `@` in `gh:owner/repo@name` is part of the skill identifier format, not a version specifier. Version pinning for indexed skills is not yet supported.
@@ -141,10 +141,10 @@ If you maintain a skill that's currently indexed (people install via `gh:`), you
 
 ```bash
 # Currently installed as:
-askill install gh:myname/my-repo/skills/cool-skill
+askill add gh:myname/my-repo/skills/cool-skill
 
 # After publishing:
-askill install @myname/cool-skill
+askill add @myname/cool-skill
 ```
 
 The indexed version remains available, but you can now:

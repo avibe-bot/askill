@@ -13,7 +13,7 @@ npm install -g @askill/cli
 ### Using npx (no install)
 
 ```bash
-npx @askill/cli install @anthropic/memory
+npx @askill/cli add @anthropic/memory
 ```
 
 ### Verify Installation
@@ -28,13 +28,13 @@ askill --version
 
 ```bash
 # Browse popular skills
-askill search
+askill find
 
 # Search by keyword
-askill search memory
+askill find memory
 
 # Search by tag
-askill search --tag git
+askill find --tag git
 ```
 
 ### 2. View Skill Details
@@ -54,13 +54,13 @@ Output:
   Stars:       1,234
   Tags:        memory, context, persistence
 
-  Install:     askill install @anthropic/memory
+  Install:     askill add @anthropic/memory
 ```
 
 ### 3. Install a Skill
 
 ```bash
-askill install @anthropic/memory
+askill add @anthropic/memory
 ```
 
 The CLI will:
@@ -70,7 +70,7 @@ The CLI will:
 4. Install and configure automatically
 
 ```
-◆ askill install
+◆ askill add
 
   Installing @anthropic/memory...
 
@@ -101,7 +101,7 @@ You can also install skills directly from GitHub repositories:
 
 ```bash
 # Install from a specific path in a repo
-askill install gh:facebook/react/scripts/error-codes
+askill add gh:facebook/react/scripts/error-codes
 
 # The gh: prefix indicates an indexed (non-published) skill
 ```
@@ -153,17 +153,17 @@ askill remove @anthropic/memory
 
 ```bash
 # Install globally (available everywhere)
-askill install -g @anthropic/memory
+askill add -g @anthropic/memory
 
 # Install for current project only (default)
-askill install @anthropic/memory
+askill add @anthropic/memory
 ```
 
 ### Specify Agents
 
 ```bash
 # Install only for specific agents
-askill install @anthropic/memory --agent claude-code cursor
+askill add @anthropic/memory --agent claude-code cursor
 ```
 
 ## Next Steps

@@ -111,7 +111,7 @@ askill publish
   ✓ Registered in registry
   
   Published! Install with:
-    askill install @johndoe/awesome-tool
+    askill add @johndoe/awesome-tool
   
   View at: https://askill.sh/@johndoe/awesome-tool
 ```
@@ -191,9 +191,9 @@ We follow [semver](https://semver.org/):
 Users can install with version constraints:
 
 ```bash
-askill install @johndoe/awesome-tool@^1.0.0  # Any 1.x.x
-askill install @johndoe/awesome-tool@~1.0.0  # Any 1.0.x
-askill install @johndoe/awesome-tool@1.0.0   # Exactly 1.0.0
+askill add @johndoe/awesome-tool@^1.0.0  # Any 1.x.x
+askill add @johndoe/awesome-tool@~1.0.0  # Any 1.0.x
+askill add @johndoe/awesome-tool@1.0.0   # Exactly 1.0.0
 ```
 
 ### Pre-release Versions
@@ -205,9 +205,9 @@ version: 2.0.0-beta.1
 Pre-release versions are not installed by default:
 
 ```bash
-askill install @johndoe/awesome-tool          # Gets latest stable
-askill install @johndoe/awesome-tool@beta     # Gets latest beta
-askill install @johndoe/awesome-tool@2.0.0-beta.1  # Exact pre-release
+askill add @johndoe/awesome-tool          # Gets latest stable
+askill add @johndoe/awesome-tool@beta     # Gets latest beta
+askill add @johndoe/awesome-tool@2.0.0-beta.1  # Exact pre-release
 ```
 
 ## Unpublishing

@@ -14,10 +14,10 @@ askill is a universal package manager for AI agent skills. It enables agents to 
 npm install -g @askill/cli
 
 # Install a skill
-askill install @anthropic/memory
+askill add @anthropic/memory
 
 # Search for skills
-askill search code review
+askill find code review
 
 # Run a skill command
 askill run @anthropic/memory:save --key name --value "John"
@@ -45,7 +45,7 @@ npm install -g @askill/cli
 ### npx (no install)
 
 ```bash
-npx @askill/cli install @anthropic/memory
+npx @askill/cli add @anthropic/memory
 ```
 
 ### Verify
@@ -60,17 +60,17 @@ askill --version
 
 ```bash
 # Published skill
-askill install @anthropic/memory
+askill add @anthropic/memory
 
 # From GitHub (indexed)
-askill install gh:facebook/react/scripts/error-codes
+askill add gh:facebook/react/scripts/error-codes
 ```
 
 ### Search Skills
 
 ```bash
-askill search memory
-askill search --tag git
+askill find memory
+askill find --tag git
 ```
 
 ### List Installed Skills
