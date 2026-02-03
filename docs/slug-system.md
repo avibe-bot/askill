@@ -13,7 +13,8 @@ askill supports two types of slugs:
 | Type | Format | Example | Source |
 |------|--------|---------|--------|
 | **Published** | `@scope/name` | `@anthropic/memory` | askill.sh registry |
-| **Indexed** | `gh:owner/repo/path` | `gh:facebook/react/scripts/errors` | GitHub (auto-indexed) |
+| **Indexed** | `gh:owner/repo@name` | `gh:facebook/react@extract-errors` | GitHub (auto-indexed) |
+| **Indexed** (full path) | `gh:owner/repo/path` | `gh:facebook/react/scripts/errors` | GitHub (auto-indexed) |
 
 ## Published Skills (`@scope/name`)
 
@@ -53,23 +54,47 @@ Scopes are automatically linked to your GitHub identity when you first publish.
 | Version management | Full semver support | Git-based only |
 | Stats | Downloads, stars | GitHub stars only |
 
-## Indexed Skills (`gh:owner/repo/path`)
+## Indexed Skills (`gh:owner/repo@name` or `gh:owner/repo/path`)
 
 Indexed skills are automatically discovered from public GitHub repositories that contain SKILL.md files.
 
-### Format
+### Formats
 
+There are two formats for indexed skills:
+
+**Short format** (`gh:owner/repo@name`) - Used when the skill name is unique within the repository:
 ```
-gh:owner/repo
-gh:owner/repo/path/to/skill
+gh:facebook/react@extract-errors
+gh:vercel/next.js@font-optimizer
+gh:anthropic/claude-tools@memory
 ```
 
-Examples:
+**Full path format** (`gh:owner/repo/path`) - Used when name conflicts exist or for precision:
 ```
-gh:facebook/react                          # Root SKILL.md
-gh:facebook/react/scripts/error-codes      # Nested SKILL.md
+gh:facebook/react/scripts/error-codes
 gh:vercel/next.js/packages/next/build
+gh:anthropic/claude-tools/memory/v2
 ```
+
+### Which Format to Use?
+
+| Situation | Format | Example |
+|-----------|--------|---------|
+| Skill name is unique in repo | `gh:owner/repo@name` | `gh:facebook/react@extract-errors` |
+| Multiple skills with same name | `gh:owner/repo/path` | `gh:facebook/react/scripts/extract-errors` |
+| Want explicit path | `gh:owner/repo/path` | `gh:myorg/repo/skills/memory` |
+
+The askill.sh website automatically shows the shortest valid format for each skill.
+
+### Legacy Format
+
+For backward compatibility, the `gh:` prefix is optional:
+```
+facebook/react@extract-errors      # Same as gh:facebook/react@extract-errors
+facebook/react/scripts/errors      # Same as gh:facebook/react/scripts/errors
+```
+
+However, we recommend always using the `gh:` prefix to clearly indicate these are indexed (not published) skills.
 
 ### How Indexing Works
 
@@ -89,9 +114,10 @@ gh:vercel/next.js/packages/next/build
 When you run `askill install <slug>`:
 
 ```
-1. If starts with @  → Look up in registry
-2. If starts with gh: → Look up in GitHub index
-3. Otherwise → Error (ambiguous)
+1. If starts with @     → Look up in registry (published skill)
+2. If starts with gh:   → Look up in GitHub index
+3. If contains / or @   → Treat as indexed (legacy, assumes gh:)
+4. Otherwise            → Error (ambiguous)
 ```
 
 ### Version Resolution
@@ -102,12 +128,12 @@ askill install @anthropic/memory@^1.0.0    # Latest 1.x.x
 askill install @anthropic/memory@~1.2.0    # Latest 1.2.x
 askill install @anthropic/memory@1.2.3     # Exact version
 
-# Indexed skills use git refs
-askill install gh:owner/repo               # Default branch
-askill install gh:owner/repo@v1.0.0        # Git tag
-askill install gh:owner/repo@main          # Branch
-askill install gh:owner/repo@abc123        # Commit
+# Indexed skills - both formats work the same
+askill install gh:owner/repo@skill-name    # Default branch, short format
+askill install gh:owner/repo/path          # Default branch, full path
 ```
+
+Note: For indexed skills, the `@` in `gh:owner/repo@name` is part of the skill identifier format, not a version specifier. Version pinning for indexed skills is not yet supported.
 
 ## Migrating from Indexed to Published
 
@@ -195,10 +221,11 @@ https://askill.sh/@anthropic                  # Scope page (all skills)
 
 ```
 GET /api/v1/skills/@anthropic/memory
-GET /api/v1/skills/gh:facebook/react/scripts/errors
+GET /api/v1/skills/facebook/react@extract-errors
+GET /api/v1/skills/facebook/react/scripts/errors
 ```
 
-Note: The `gh:` prefix is URL-encoded as `gh%3A` in API calls.
+Note: The API accepts both short and full path formats for indexed skills.
 
 ## Best Practices
 
