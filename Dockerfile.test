@@ -1,0 +1,39 @@
+# askill CLI - E2E Integration Test Environment
+# Usage:
+#   docker build -f Dockerfile.test -t askill-test .
+#   docker run --rm askill-test
+#   docker run --rm askill-test test/e2e/run.sh [test-name]
+
+FROM node:20-slim
+
+# Install git (needed for clone-based install)
+RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
+
+# Simulate agent installations so detectInstalledAgents() finds them
+RUN mkdir -p /root/.claude /root/.cursor /root/.opencode
+
+WORKDIR /app
+
+# Install dependencies first (layer cache)
+COPY package.json package-lock.json ./
+RUN npm ci
+
+# Copy source and build
+COPY tsconfig.json ./
+COPY src/ src/
+COPY skills/ skills/
+RUN npm run build
+
+# Copy test fixtures and scripts
+COPY test/ test/
+
+# Make test scripts executable
+RUN chmod +x test/e2e/*.sh
+
+# Create a fake project directory for project-level installs
+RUN mkdir -p /workspace && git config --global init.defaultBranch main
+
+ENV NODE_NO_WARNINGS=1
+
+ENTRYPOINT ["bash"]
+CMD ["test/e2e/run.sh"]

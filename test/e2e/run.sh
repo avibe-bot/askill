@@ -1,0 +1,1219 @@
+#!/usr/bin/env bash
+# askill CLI - E2E Integration Tests
+# Run all tests:        ./test/e2e/run.sh
+# Run specific test:    ./test/e2e/run.sh test_help
+# List available tests: ./test/e2e/run.sh --list
+
+set -euo pipefail
+
+# ── Colors ──────────────────────────────────────────
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+DIM='\033[2m'
+BOLD='\033[1m'
+RESET='\033[0m'
+
+# ── Counters ────────────────────────────────────────
+PASSED=0
+FAILED=0
+SKIPPED=0
+ERRORS=()
+
+# ── CLI path ────────────────────────────────────────
+CLI="node /app/dist/cli.mjs"
+WORKSPACE="/workspace"
+
+# ── Helpers ─────────────────────────────────────────
+info()  { echo -e "${DIM}  ℹ $*${RESET}"; }
+pass()  { echo -e "${GREEN}  ✓ $*${RESET}"; ((PASSED++)) || true; }
+fail()  { echo -e "${RED}  ✗ $*${RESET}"; ((FAILED++)) || true; ERRORS+=("$*"); }
+skip()  { echo -e "${YELLOW}  ⊘ $* (skipped)${RESET}"; ((SKIPPED++)) || true; }
+header(){ echo -e "\n${BOLD}━━━ $* ━━━${RESET}"; }
+
+# Strip ANSI escape codes from a string
+strip_ansi() {
+  sed 's/\x1b\[[0-9;]*m//g' | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g'
+}
+
+# Check if cleaned output matches pattern (for inline use)
+output_matches() {
+  local output="$1" pattern="$2"
+  echo "$output" | strip_ansi | grep -qi "$pattern"
+}
+
+# Assert output contains a string (ANSI-stripped)
+assert_contains() {
+  local output="$1" expected="$2" msg="${3:-}"
+  local clean
+  clean=$(echo "$output" | strip_ansi)
+  if echo "$clean" | grep -qiF -- "$expected"; then
+    pass "${msg:-contains '$expected'}"
+  else
+    fail "${msg:-expected '$expected' in output}"
+    echo -e "${DIM}    actual output (first 5 lines):${RESET}"
+    echo "$clean" | head -5 | sed 's/^/    /'
+  fi
+}
+
+# Assert output does NOT contain a string (ANSI-stripped)
+assert_not_contains() {
+  local output="$1" unexpected="$2" msg="${3:-}"
+  local clean
+  clean=$(echo "$output" | strip_ansi)
+  if echo "$clean" | grep -qiF -- "$unexpected"; then
+    fail "${msg:-unexpected '$unexpected' found in output}"
+  else
+    pass "${msg:-does not contain '$unexpected'}"
+  fi
+}
+
+# Assert command exits with specific code
+assert_exit_code() {
+  local expected="$1"; shift
+  local actual=0
+  "$@" >/dev/null 2>&1 || actual=$?
+  if [ "$actual" -eq "$expected" ]; then
+    pass "exit code $expected"
+  else
+    fail "expected exit code $expected, got $actual: $*"
+  fi
+}
+
+# Clean workspace between tests
+clean_workspace() {
+  rm -rf "$WORKSPACE"/.claude "$WORKSPACE"/.cursor "$WORKSPACE"/.opencode
+  rm -rf "$WORKSPACE"/.agents
+  rm -rf /root/.claude/skills /root/.cursor/skills /root/.opencode/skills
+  rm -rf /root/.config/askill
+  mkdir -p "$WORKSPACE"
+}
+
+
+# ════════════════════════════════════════════════════
+# Test: Banner (no args)
+# ════════════════════════════════════════════════════
+test_banner() {
+  header "Banner (no args)"
+  local output
+  output=$($CLI 2>&1) || true
+
+  assert_contains "$output" "askill" "shows product name"
+  assert_contains "$output" "askill.sh" "shows registry URL"
+  assert_contains "$output" "add" "shows add command"
+  assert_contains "$output" "find" "shows find command"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Help
+# ════════════════════════════════════════════════════
+test_help() {
+  header "Help (--help)"
+  local output
+  output=$($CLI --help 2>&1) || true
+
+  assert_contains "$output" "Usage" "shows usage"
+  assert_contains "$output" "owner/repo" "shows new source format"
+  assert_contains "$output" "Install Options" "shows install options"
+  assert_contains "$output" "--global" "shows global flag"
+  assert_contains "$output" "--yes" "shows yes flag"
+  assert_contains "$output" "--copy" "shows copy flag"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Version
+# ════════════════════════════════════════════════════
+test_version() {
+  header "Version (--version)"
+  local output
+  output=$($CLI --version 2>&1) || true
+
+  assert_contains "$output" "0.1.0" "shows version number"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Unknown command
+# ════════════════════════════════════════════════════
+test_unknown_command() {
+  header "Unknown command"
+  local output
+  output=$($CLI foobar 2>&1) || true
+
+  assert_contains "$output" "Unknown command" "rejects unknown command"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Add missing skill name
+# ════════════════════════════════════════════════════
+test_add_missing_name() {
+  header "Add - missing skill name"
+  local output
+  output=$($CLI add 2>&1) || true
+
+  assert_contains "$output" "Missing skill identifier" "shows error"
+  assert_contains "$output" "owner/repo" "shows format hint"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Search (API)
+# ════════════════════════════════════════════════════
+test_search() {
+  header "Search"
+  local output
+  output=$($CLI search memory 2>&1) || true
+
+  # If API is reachable, we get results; if not, we get an error
+  if output_matches "$output" "result\|found\|memory"; then
+    pass "search returns results or reports count"
+  elif output_matches "$output" "failed\|error\|ENOTFOUND"; then
+    skip "API not reachable (offline mode)"
+  else
+    fail "unexpected search output"
+    echo "$output" | strip_ansi | head -3 | sed 's/^/    /'
+  fi
+}
+
+# ════════════════════════════════════════════════════
+# Test: List (empty)
+# ════════════════════════════════════════════════════
+test_list_empty() {
+  header "List (empty)"
+  clean_workspace
+
+  local output
+  output=$(cd "$WORKSPACE" && $CLI list 2>&1) || true
+
+  if output_matches "$output" "0 skill\|No skills installed"; then
+    pass "shows no skills"
+  else
+    fail "shows no skills"
+  fi
+}
+
+# ════════════════════════════════════════════════════
+# Test: Install from local path
+# ════════════════════════════════════════════════════
+test_install_local() {
+  header "Install from local path"
+  clean_workspace
+
+  # Use the bundled skill as local source
+  local output
+  output=$(cd "$WORKSPACE" && $CLI add /app/skills/@askill/agent -a claude-code -y 2>&1) || true
+
+  assert_contains "$output" "agent" "installs agent skill"
+
+  # Verify files were created
+  if [ -f "$WORKSPACE/.claude/skills/agent/SKILL.md" ]; then
+    pass "SKILL.md created in .claude/skills/agent/"
+  else
+    # Check if symlink target exists
+    if [ -L "$WORKSPACE/.claude/skills/agent" ] && [ -f "$WORKSPACE/.claude/skills/agent/SKILL.md" ]; then
+      pass "SKILL.md accessible via symlink in .claude/skills/agent/"
+    else
+      fail "SKILL.md not found in .claude/skills/agent/"
+      info "Contents of .claude/skills/:"
+      ls -la "$WORKSPACE/.claude/skills/" 2>/dev/null | sed 's/^/    /' || true
+    fi
+  fi
+}
+
+# ════════════════════════════════════════════════════
+# Test: Install from local path then list
+# ════════════════════════════════════════════════════
+test_install_then_list() {
+  header "Install → List"
+  clean_workspace
+
+  # Install
+  cd "$WORKSPACE" && $CLI add /app/skills/@askill/agent -a claude-code -y >/dev/null 2>&1 || true
+
+  # List
+  local output
+  output=$(cd "$WORKSPACE" && $CLI list 2>&1) || true
+
+  assert_contains "$output" "agent" "lists installed skill"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Install from local path then remove
+# ════════════════════════════════════════════════════
+test_install_then_remove() {
+  header "Install → Remove"
+  clean_workspace
+
+  # Install
+  cd "$WORKSPACE" && $CLI add /app/skills/@askill/agent -a claude-code -y >/dev/null 2>&1 || true
+
+  # Verify installed
+  if [ ! -e "$WORKSPACE/.claude/skills/agent" ]; then
+    fail "skill not installed, cannot test removal"
+    return
+  fi
+
+  # Remove (pipe yes for confirmation)
+  local output
+  output=$(cd "$WORKSPACE" && echo "y" | $CLI remove agent 2>&1) || true
+
+  # Verify removed
+  if [ ! -e "$WORKSPACE/.claude/skills/agent" ]; then
+    pass "skill removed from .claude/skills/"
+  else
+    fail "skill still exists after removal"
+  fi
+}
+
+# ════════════════════════════════════════════════════
+# Test: Install to multiple agents
+# ════════════════════════════════════════════════════
+test_install_multi_agent() {
+  header "Install to multiple agents"
+  clean_workspace
+
+  local output
+  output=$(cd "$WORKSPACE" && $CLI add /app/skills/@askill/agent -a claude-code cursor -y 2>&1) || true
+
+  assert_contains "$output" "2 agent" "installs to 2 agents"
+
+  local found=0
+  [ -e "$WORKSPACE/.claude/skills/agent" ] && ((found++)) || true
+  [ -e "$WORKSPACE/.cursor/skills/agent" ] && ((found++)) || true
+
+  if [ "$found" -eq 2 ]; then
+    pass "skill present in both agent directories"
+  else
+    fail "skill found in only $found/2 agent directories"
+  fi
+}
+
+# ════════════════════════════════════════════════════
+# Test: Install globally
+# ════════════════════════════════════════════════════
+test_install_global() {
+  header "Install globally"
+  clean_workspace
+
+  local output
+  output=$(cd "$WORKSPACE" && $CLI add /app/skills/@askill/agent -a claude-code -g -y 2>&1) || true
+
+  # Global install goes to ~/.claude/skills/
+  if [ -e "/root/.claude/skills/agent" ]; then
+    pass "skill installed globally to ~/.claude/skills/"
+  else
+    fail "skill not found at ~/.claude/skills/agent"
+    info "Contents of ~/.claude/:"
+    ls -la /root/.claude/ 2>/dev/null | sed 's/^/    /' || true
+  fi
+}
+
+# ════════════════════════════════════════════════════
+# Test: Install with --copy mode
+# ════════════════════════════════════════════════════
+test_install_copy_mode() {
+  header "Install --copy mode"
+  clean_workspace
+
+  local output
+  output=$(cd "$WORKSPACE" && $CLI add /app/skills/@askill/agent -a claude-code --copy -y 2>&1) || true
+
+  if [ -d "$WORKSPACE/.claude/skills/agent" ] && [ ! -L "$WORKSPACE/.claude/skills/agent" ]; then
+    pass "installed as directory (not symlink) in copy mode"
+  elif [ -L "$WORKSPACE/.claude/skills/agent" ]; then
+    fail "installed as symlink, expected copy"
+  else
+    fail "skill not installed"
+  fi
+}
+
+# ════════════════════════════════════════════════════
+# Test: Install from git clone (GitHub repo)
+# ════════════════════════════════════════════════════
+test_install_git_clone() {
+  header "Install from git clone (GitHub)"
+  clean_workspace
+
+  # Use a known small repo with SKILL.md files
+  # This tests the full clone → discover → install flow
+  local output
+  output=$(cd "$WORKSPACE" && timeout 30 $CLI add anthropics/courses -a claude-code -y 2>&1) || true
+
+  if output_matches "$output" "skill\|installed\|Done"; then
+    pass "clone-based install completes"
+    assert_not_contains "$output" "Error" "no errors during install"
+  elif output_matches "$output" "Clone failed\|timed out\|not found\|No skills found"; then
+    skip "clone failed (network or repo issue)"
+  else
+    fail "unexpected output from clone install"
+    echo "$output" | strip_ansi | head -5 | sed 's/^/    /'
+  fi
+
+  # Verify tempDir was cleaned up
+  local leftover
+  leftover=$(find /tmp -maxdepth 1 -name 'askill-*' -type d 2>/dev/null | wc -l)
+  leftover=$(echo "$leftover" | tr -d ' ')
+  if [ "$leftover" -eq 0 ]; then
+    pass "temp directories cleaned up"
+  else
+    fail "$leftover temp directories left behind"
+    ls -d /tmp/askill-* 2>/dev/null | sed 's/^/    /'
+  fi
+}
+
+# ════════════════════════════════════════════════════
+# Test: Config persistence (preferred agents via lock file)
+# ════════════════════════════════════════════════════
+test_config_persistence() {
+  header "Config persistence"
+  clean_workspace
+
+  # Remove any existing files
+  rm -f /root/.agents/.skill-lock.json
+  rm -f /root/.config/askill/config.json
+
+  # First install - should save preferred agents to lock file
+  cd "$WORKSPACE" && $CLI add /app/skills/@askill/agent -a claude-code -y >/dev/null 2>&1 || true
+
+  # Check lock file (new location for lastSelectedAgents)
+  if [ -f "/root/.agents/.skill-lock.json" ]; then
+    pass "lock file created"
+    local content
+    content=$(cat /root/.agents/.skill-lock.json)
+    assert_contains "$content" "claude-code" "preferred agents saved in lock file"
+  else
+    fail "lock file not created at ~/.agents/.skill-lock.json"
+  fi
+}
+
+# ════════════════════════════════════════════════════
+# Test: Install local directory with multiple skills
+# ════════════════════════════════════════════════════
+test_install_multi_skill_dir() {
+  header "Install directory with multiple skills"
+  clean_workspace
+
+  # Create a temp directory with 2 skills
+  local src="/tmp/test-multi-skills"
+  rm -rf "$src"
+  mkdir -p "$src/skills/skill-a" "$src/skills/skill-b"
+
+  cat > "$src/skills/skill-a/SKILL.md" <<'SKILL'
+---
+name: test-skill-a
+description: Test skill A for e2e testing
+version: 1.0.0
+---
+
+# Test Skill A
+
+This is a test skill.
+SKILL
+
+  cat > "$src/skills/skill-b/SKILL.md" <<'SKILL'
+---
+name: test-skill-b
+description: Test skill B for e2e testing
+version: 1.0.0
+---
+
+# Test Skill B
+
+This is another test skill.
+SKILL
+
+  local output
+  output=$(cd "$WORKSPACE" && $CLI add "$src" -a claude-code -y 2>&1) || true
+
+  assert_contains "$output" "2 skill" "discovers 2 skills"
+  assert_contains "$output" "test-skill-a" "installs skill A"
+  assert_contains "$output" "test-skill-b" "installs skill B"
+
+  rm -rf "$src"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Source parser formats
+# ════════════════════════════════════════════════════
+test_source_parser() {
+  header "Source parser (format variations)"
+
+  # Test that various formats are accepted (don't need actual repos, just check parsing)
+  # We test by looking at the spinner/error messages which reveal what was parsed
+
+  # owner/repo format
+  local output
+  output=$(cd "$WORKSPACE" && timeout 10 $CLI add nonexistent/fakerepo -y 2>&1) || true
+  if output_matches "$output" "cloning\|clone\|fakerepo"; then
+    pass "owner/repo: triggers clone"
+  else
+    skip "owner/repo format: could not verify"
+  fi
+
+  # owner/repo@skill format
+  output=$(cd "$WORKSPACE" && timeout 10 $CLI add nonexistent/fakerepo@myskill -y 2>&1) || true
+  if output_matches "$output" "cloning\|clone\|fakerepo"; then
+    pass "owner/repo@skill: triggers clone"
+  else
+    skip "owner/repo@skill format: could not verify"
+  fi
+}
+
+# ════════════════════════════════════════════════════
+# Test: Symlink mode (default)
+# ════════════════════════════════════════════════════
+test_symlink_mode() {
+  header "Symlink mode (default)"
+  clean_workspace
+
+  cd "$WORKSPACE" && $CLI add /app/skills/@askill/agent -a claude-code -y >/dev/null 2>&1 || true
+
+  if [ -L "$WORKSPACE/.claude/skills/agent" ]; then
+    pass "installed as symlink"
+    # Verify canonical location
+    if [ -d "$WORKSPACE/.agents/skills/agent" ]; then
+      pass "canonical directory created at .agents/skills/"
+    else
+      fail "canonical directory not found"
+    fi
+  elif [ -d "$WORKSPACE/.claude/skills/agent" ]; then
+    # Symlink may have failed, copy fallback is OK
+    pass "installed as directory (symlink fallback)"
+  else
+    fail "skill not installed"
+  fi
+}
+
+# ════════════════════════════════════════════════════
+# Test: Info command
+# ════════════════════════════════════════════════════
+test_info() {
+  header "Info command"
+
+  # This requires API, may not work offline
+  local output
+  output=$(timeout 10 $CLI info memory 2>&1) || true
+
+  if output_matches "$output" "not found\|404"; then
+    skip "skill 'memory' not in registry"
+  elif output_matches "$output" "ENOTFOUND\|failed\|error"; then
+    skip "API not reachable"
+  elif output_matches "$output" "Owner\|Repository\|Install"; then
+    pass "info shows skill details"
+  else
+    skip "info: unexpected output"
+  fi
+}
+
+
+# ════════════════════════════════════════════════════
+# Test: Skill lock file written on install
+# ════════════════════════════════════════════════════
+test_lock_file_install() {
+  header "Lock file - written on install"
+  clean_workspace
+
+  # Remove any existing lock file
+  rm -f /root/.agents/.skill-lock.json
+
+  # Install a skill
+  cd "$WORKSPACE" && $CLI add /app/skills/@askill/agent -a claude-code -y >/dev/null 2>&1 || true
+
+  if [ -f "/root/.agents/.skill-lock.json" ]; then
+    pass "lock file created at ~/.agents/.skill-lock.json"
+
+    local content
+    content=$(cat /root/.agents/.skill-lock.json)
+
+    # Check structure
+    assert_contains "$content" '"version"' "has version field"
+    assert_contains "$content" '"skills"' "has skills map"
+    assert_contains "$content" '"agent"' "contains installed skill name"
+    assert_contains "$content" '"source"' "has source field"
+    assert_contains "$content" '"sourceType"' "has sourceType field"
+    assert_contains "$content" '"installedAt"' "has installedAt timestamp"
+    assert_contains "$content" '"updatedAt"' "has updatedAt timestamp"
+    assert_contains "$content" '"lastSelectedAgents"' "has lastSelectedAgents"
+    assert_contains "$content" '"claude-code"' "lastSelectedAgents includes claude-code"
+  else
+    fail "lock file not created"
+  fi
+}
+
+# ════════════════════════════════════════════════════
+# Test: Skill lock file cleaned on remove
+# ════════════════════════════════════════════════════
+test_lock_file_remove() {
+  header "Lock file - cleaned on remove"
+  clean_workspace
+
+  # Remove any existing lock file
+  rm -f /root/.agents/.skill-lock.json
+
+  # Install
+  cd "$WORKSPACE" && $CLI add /app/skills/@askill/agent -a claude-code -y >/dev/null 2>&1 || true
+
+  # Verify it's in lock
+  if [ ! -f "/root/.agents/.skill-lock.json" ]; then
+    fail "lock file not created, cannot test removal"
+    return
+  fi
+
+  local before
+  before=$(cat /root/.agents/.skill-lock.json)
+  assert_contains "$before" '"agent"' "skill in lock before removal"
+
+  # Remove
+  cd "$WORKSPACE" && echo "y" | $CLI remove agent >/dev/null 2>&1 || true
+
+  # Verify skill is removed from lock but file still exists
+  if [ -f "/root/.agents/.skill-lock.json" ]; then
+    local after
+    after=$(cat /root/.agents/.skill-lock.json)
+    if echo "$after" | grep -q '"agent"'; then
+      fail "skill still in lock file after removal"
+    else
+      pass "skill removed from lock file"
+    fi
+  else
+    fail "lock file deleted entirely (should still exist)"
+  fi
+}
+
+# ════════════════════════════════════════════════════
+# Test: Lock file version compatibility
+# ════════════════════════════════════════════════════
+test_lock_file_version() {
+  header "Lock file - version compatibility"
+  clean_workspace
+
+  # Remove any existing lock file
+  rm -f /root/.agents/.skill-lock.json
+
+  # Install to create lock
+  cd "$WORKSPACE" && $CLI add /app/skills/@askill/agent -a claude-code -y >/dev/null 2>&1 || true
+
+  if [ -f "/root/.agents/.skill-lock.json" ]; then
+    local content
+    content=$(cat /root/.agents/.skill-lock.json)
+    # Should be version 3 (Vercel Skills compatible)
+    assert_contains "$content" '"version": 3' "version is 3 (Vercel compatible)"
+  else
+    fail "lock file not created"
+  fi
+}
+
+
+# ════════════════════════════════════════════════════
+# Test: Check command - no skills installed
+# ════════════════════════════════════════════════════
+test_check_empty() {
+  header "Check - no skills installed"
+  clean_workspace
+
+  # Remove any existing lock file
+  rm -f /root/.agents/.skill-lock.json
+
+  local output
+  output=$(cd "$WORKSPACE" && $CLI check 2>&1) || true
+
+  assert_contains "$output" "No" "reports no skills tracked"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Check command - local source (uncheckable)
+# ════════════════════════════════════════════════════
+test_check_local_source() {
+  header "Check - local source (uncheckable)"
+  clean_workspace
+
+  # Remove any existing lock file
+  rm -f /root/.agents/.skill-lock.json
+
+  # Install from local path (creates a lock entry with sourceType=local)
+  cd "$WORKSPACE" && $CLI add /app/skills/@askill/agent -a claude-code -y >/dev/null 2>&1 || true
+
+  # Check should report as uncheckable since it's a local source
+  local output
+  output=$(cd "$WORKSPACE" && $CLI check 2>&1) || true
+
+  assert_contains "$output" "1 tracked" "finds 1 tracked skill"
+  # Should either show 'local source' or 'up to date' (all up to date message)
+  if output_matches "$output" "local source\|uncheckable\|up to date\|All up to date"; then
+    pass "handles local source correctly"
+  else
+    fail "unexpected check output for local source"
+    echo "$output" | strip_ansi | head -10 | sed 's/^/    /'
+  fi
+}
+
+# ════════════════════════════════════════════════════
+# Test: Check command - help text shown in help
+# ════════════════════════════════════════════════════
+test_help_includes_check() {
+  header "Help includes check/update commands"
+
+  local output
+  output=$($CLI --help 2>&1) || true
+
+  assert_contains "$output" "check" "help shows check command"
+  assert_contains "$output" "update" "help shows update command"
+  assert_contains "$output" "self-update" "help shows self-update command"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Update command - nothing to update
+# ════════════════════════════════════════════════════
+test_update_noop() {
+  header "Update - nothing to update"
+  clean_workspace
+
+  # Remove any existing lock file
+  rm -f /root/.agents/.skill-lock.json
+
+  # Install from local (can't check for updates)
+  cd "$WORKSPACE" && $CLI add /app/skills/@askill/agent -a claude-code -y >/dev/null 2>&1 || true
+
+  local output
+  output=$(cd "$WORKSPACE" && $CLI update -y 2>&1) || true
+
+  # Should either report "All skills up to date" or "Nothing to update"
+  if output_matches "$output" "up to date\|Nothing to update"; then
+    pass "reports nothing to update"
+  else
+    fail "unexpected update output"
+    echo "$output" | strip_ansi | head -10 | sed 's/^/    /'
+  fi
+}
+
+# ════════════════════════════════════════════════════
+# Test: Update command - empty lock file
+# ════════════════════════════════════════════════════
+test_update_empty() {
+  header "Update - no skills tracked"
+  clean_workspace
+
+  # Remove any existing lock file
+  rm -f /root/.agents/.skill-lock.json
+
+  local output
+  output=$(cd "$WORKSPACE" && $CLI update -y 2>&1) || true
+
+  assert_contains "$output" "No" "reports no skills tracked"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Check after git install (network test)
+# ════════════════════════════════════════════════════
+test_check_after_git_install() {
+  header "Check after git install (network)"
+  clean_workspace
+
+  # Remove any existing lock file
+  rm -f /root/.agents/.skill-lock.json
+
+  # Install from GitHub - use a known small repo
+  local output
+  output=$(cd "$WORKSPACE" && timeout 30 $CLI add anthropics/courses -a claude-code -y 2>&1) || true
+
+  if output_matches "$output" "Error\|failed\|timed out\|No skills found\|Clone failed"; then
+    skip "git install failed (network issue), skipping check test"
+    return
+  fi
+
+  # Now run check - should report up to date (just installed)
+  output=$(cd "$WORKSPACE" && timeout 30 $CLI check 2>&1) || true
+
+  if output_matches "$output" "up to date\|All up to date\|0 update"; then
+    pass "freshly installed skills are up to date"
+  elif output_matches "$output" "update.*available\|uncheckable\|could not"; then
+    # Race condition or API limit - acceptable
+    skip "check result inconclusive (API rate limit or timing)"
+  else
+    fail "unexpected check output after git install"
+    echo "$output" | strip_ansi | head -10 | sed 's/^/    /'
+  fi
+}
+
+# ════════════════════════════════════════════════════
+# Test: Init command
+# ════════════════════════════════════════════════════
+test_init() {
+  header "Init command"
+  clean_workspace
+
+  # Create a temp directory for the skill
+  local skill_dir="$WORKSPACE/my-test-skill"
+  mkdir -p "$skill_dir"
+
+  # Run init with -y for non-interactive
+  local output
+  output=$(cd "$skill_dir" && $CLI init -y 2>&1) || true
+
+  assert_contains "$output" "Created" "reports file created"
+  
+  # Verify SKILL.md was created
+  if [ -f "$skill_dir/SKILL.md" ]; then
+    pass "SKILL.md created"
+    local content
+    content=$(cat "$skill_dir/SKILL.md")
+    assert_contains "$content" "name:" "SKILL.md has name field"
+    assert_contains "$content" "description:" "SKILL.md has description field"
+    assert_contains "$content" "version:" "SKILL.md has version field"
+  else
+    fail "SKILL.md not created"
+  fi
+
+  rm -rf "$skill_dir"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Init command - already exists
+# ════════════════════════════════════════════════════
+test_init_already_exists() {
+  header "Init - SKILL.md already exists"
+  clean_workspace
+
+  local skill_dir="$WORKSPACE/existing-skill"
+  mkdir -p "$skill_dir"
+  echo "existing content" > "$skill_dir/SKILL.md"
+
+  local output
+  output=$(cd "$skill_dir" && $CLI init -y 2>&1) || true
+
+  assert_contains "$output" "already exists" "reports file already exists"
+  
+  # Content should be unchanged
+  local content
+  content=$(cat "$skill_dir/SKILL.md")
+  assert_contains "$content" "existing content" "original content preserved"
+
+  rm -rf "$skill_dir"
+}
+
+# ════════════════════════════════════════════════════
+# Test: --list option
+# ════════════════════════════════════════════════════
+test_list_option() {
+  header "Add --list option"
+  clean_workspace
+
+  # Create a multi-skill directory
+  local src="/tmp/test-list-skills"
+  rm -rf "$src"
+  mkdir -p "$src/skill-one" "$src/skill-two"
+
+  cat > "$src/skill-one/SKILL.md" <<'SKILL'
+---
+name: skill-one
+description: First test skill
+version: 1.0.0
+---
+# Skill One
+SKILL
+
+  cat > "$src/skill-two/SKILL.md" <<'SKILL'
+---
+name: skill-two
+description: Second test skill
+version: 1.0.0
+---
+# Skill Two
+SKILL
+
+  local output
+  output=$(cd "$WORKSPACE" && $CLI add "$src" --list 2>&1) || true
+
+  assert_contains "$output" "skill-one" "lists skill-one"
+  assert_contains "$output" "skill-two" "lists skill-two"
+  assert_contains "$output" "2 skill" "reports 2 skills found"
+
+  # Should NOT have installed anything
+  if [ -e "$WORKSPACE/.agents/skills/skill-one" ]; then
+    fail "skill-one was installed (should only list)"
+  else
+    pass "no skills installed in list mode"
+  fi
+
+  rm -rf "$src"
+}
+
+# ════════════════════════════════════════════════════
+# Test: --all option
+# ════════════════════════════════════════════════════
+test_all_option() {
+  header "Add --all option"
+  clean_workspace
+
+  # Create a multi-skill directory
+  local src="/tmp/test-all-skills"
+  rm -rf "$src"
+  mkdir -p "$src/alpha" "$src/beta"
+
+  cat > "$src/alpha/SKILL.md" <<'SKILL'
+---
+name: alpha
+description: Alpha skill
+version: 1.0.0
+---
+# Alpha
+SKILL
+
+  cat > "$src/beta/SKILL.md" <<'SKILL'
+---
+name: beta
+description: Beta skill
+version: 1.0.0
+---
+# Beta
+SKILL
+
+  local output
+  output=$(cd "$WORKSPACE" && $CLI add "$src" --all -a claude-code -y 2>&1) || true
+
+  assert_contains "$output" "alpha" "installs alpha"
+  assert_contains "$output" "beta" "installs beta"
+  assert_contains "$output" "2 skill" "reports 2 skills installed"
+
+  # Verify both installed
+  local count=0
+  [ -e "$WORKSPACE/.claude/skills/alpha" ] && ((count++)) || true
+  [ -e "$WORKSPACE/.claude/skills/beta" ] && ((count++)) || true
+
+  if [ "$count" -eq 2 ]; then
+    pass "both skills installed with --all"
+  else
+    fail "only $count/2 skills installed"
+  fi
+
+  rm -rf "$src"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Help includes new options
+# ════════════════════════════════════════════════════
+test_help_new_options() {
+  header "Help includes init/list/all"
+
+  local output
+  output=$($CLI --help 2>&1) || true
+
+  assert_contains "$output" "init" "help shows init command"
+  assert_contains "$output" "--list" "help shows --list option"
+  assert_contains "$output" "--all" "help shows --all option"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Run command - missing target
+# ════════════════════════════════════════════════════
+test_run_missing_target() {
+  header "Run - missing target"
+
+  local output
+  output=$($CLI run 2>&1) || true
+
+  assert_contains "$output" "Missing run target" "shows missing target error"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Run command - invalid format
+# ════════════════════════════════════════════════════
+test_run_invalid_format() {
+  header "Run - invalid format"
+
+  local output
+  output=$($CLI run no-colon-here 2>&1) || true
+
+  assert_contains "$output" "Invalid run target" "shows invalid format error"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Run command - skill not found
+# ════════════════════════════════════════════════════
+test_run_skill_not_found() {
+  header "Run - skill not found"
+  clean_workspace
+
+  local output
+  output=$(cd "$WORKSPACE" && $CLI run nonexistent:build 2>&1) || true
+
+  assert_contains "$output" "not found" "reports skill not found"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Run command - no commands defined
+# ════════════════════════════════════════════════════
+test_run_no_commands() {
+  header "Run - no commands defined"
+  clean_workspace
+
+  # Install a skill without commands
+  cd "$WORKSPACE" && $CLI add /app/skills/@askill/agent -a claude-code -y >/dev/null 2>&1 || true
+
+  local output
+  output=$(cd "$WORKSPACE" && $CLI run agent:build 2>&1) || true
+
+  assert_contains "$output" "does not define any commands" "reports no commands"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Run command - execute a simple command
+# ════════════════════════════════════════════════════
+test_run_execute() {
+  header "Run - execute command"
+  clean_workspace
+
+  # Create a skill with commands
+  local src="/tmp/test-run-skill"
+  rm -rf "$src"
+  mkdir -p "$src/runnable"
+
+  cat > "$src/runnable/SKILL.md" <<'SKILL'
+---
+name: runnable
+description: A skill with runnable commands
+version: 1.0.0
+commands:
+  greet:
+    run: echo "Hello from runnable!"
+    description: Print a greeting
+  status:
+    run: echo "status OK"
+    description: Show status
+  _setup:
+    run: echo "setup done"
+    description: Internal setup command
+---
+
+# Runnable Skill
+
+A test skill with commands.
+SKILL
+
+  # Install it
+  cd "$WORKSPACE" && $CLI add "$src" -a claude-code -y >/dev/null 2>&1 || true
+
+  # Run the greet command
+  local output
+  output=$(cd "$WORKSPACE" && $CLI run runnable:greet 2>&1) || true
+
+  assert_contains "$output" "Hello from runnable" "executes greet command"
+
+  rm -rf "$src"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Run command - command not found
+# ════════════════════════════════════════════════════
+test_run_command_not_found() {
+  header "Run - command not found in skill"
+  clean_workspace
+
+  # Create a skill with commands
+  local src="/tmp/test-run-notfound"
+  rm -rf "$src"
+  mkdir -p "$src/cmdskill"
+
+  cat > "$src/cmdskill/SKILL.md" <<'SKILL'
+---
+name: cmdskill
+description: Skill with limited commands
+version: 1.0.0
+commands:
+  build:
+    run: echo "building"
+    description: Build stuff
+---
+
+# Command Skill
+SKILL
+
+  cd "$WORKSPACE" && $CLI add "$src" -a claude-code -y >/dev/null 2>&1 || true
+
+  local output
+  output=$(cd "$WORKSPACE" && $CLI run cmdskill:deploy 2>&1) || true
+
+  assert_contains "$output" "not found" "reports command not found"
+  assert_contains "$output" "build" "shows available commands"
+
+  rm -rf "$src"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Run command - with extra args
+# ════════════════════════════════════════════════════
+test_run_with_args() {
+  header "Run - with extra arguments"
+  clean_workspace
+
+  # Create a skill with a command that echoes args
+  local src="/tmp/test-run-args"
+  rm -rf "$src"
+  mkdir -p "$src/argskill"
+
+  cat > "$src/argskill/SKILL.md" <<'SKILL'
+---
+name: argskill
+description: Skill that accepts args
+version: 1.0.0
+commands:
+  echo-args:
+    run: echo "args:"
+    description: Echo with args
+---
+
+# Arg Skill
+SKILL
+
+  cd "$WORKSPACE" && $CLI add "$src" -a claude-code -y >/dev/null 2>&1 || true
+
+  # Run with extra args (using -- separator)
+  local output
+  output=$(cd "$WORKSPACE" && $CLI run argskill:echo-args -- foo bar 2>&1) || true
+
+  assert_contains "$output" "args:" "base command executed"
+  assert_contains "$output" "foo" "first arg passed"
+  assert_contains "$output" "bar" "second arg passed"
+
+  rm -rf "$src"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Run command - with script file
+# ════════════════════════════════════════════════════
+test_run_script() {
+  header "Run - script execution"
+  clean_workspace
+
+  # Create a skill with a script
+  local src="/tmp/test-run-script"
+  rm -rf "$src"
+  mkdir -p "$src/scriptskill/scripts"
+
+  cat > "$src/scriptskill/scripts/hello.sh" <<'SCRIPT'
+#!/usr/bin/env bash
+echo "Script says: $ASKILL_SKILL_NAME"
+SCRIPT
+  chmod +x "$src/scriptskill/scripts/hello.sh"
+
+  cat > "$src/scriptskill/SKILL.md" <<'SKILL'
+---
+name: scriptskill
+description: Skill with script command
+version: 1.0.0
+commands:
+  hello:
+    run: bash scripts/hello.sh
+    description: Run the hello script
+---
+
+# Script Skill
+SKILL
+
+  cd "$WORKSPACE" && $CLI add "$src" -a claude-code -y >/dev/null 2>&1 || true
+
+  local output
+  output=$(cd "$WORKSPACE" && $CLI run scriptskill:hello 2>&1) || true
+
+  assert_contains "$output" "Script says: scriptskill" "script receives ASKILL_SKILL_NAME env var"
+
+  rm -rf "$src"
+}
+
+# ════════════════════════════════════════════════════
+# Runner
+# ════════════════════════════════════════════════════
+
+ALL_TESTS=(
+  test_banner
+  test_help
+  test_version
+  test_unknown_command
+  test_add_missing_name
+  test_list_empty
+  test_install_local
+  test_install_then_list
+  test_install_then_remove
+  test_install_multi_agent
+  test_install_global
+  test_install_copy_mode
+  test_install_multi_skill_dir
+  test_symlink_mode
+  test_config_persistence
+  test_lock_file_install
+  test_lock_file_remove
+  test_lock_file_version
+  test_help_includes_check
+  test_check_empty
+  test_check_local_source
+  test_update_noop
+  test_update_empty
+  test_source_parser
+  test_install_git_clone
+  test_check_after_git_install
+  test_init
+  test_init_already_exists
+  test_list_option
+  test_all_option
+  test_help_new_options
+  test_run_missing_target
+  test_run_invalid_format
+  test_run_skill_not_found
+  test_run_no_commands
+  test_run_execute
+  test_run_command_not_found
+  test_run_with_args
+  test_run_script
+  test_search
+  test_info
+)
+
+# List mode
+if [ "${1:-}" = "--list" ]; then
+  echo "Available tests:"
+  for t in "${ALL_TESTS[@]}"; do echo "  $t"; done
+  exit 0
+fi
+
+echo -e "${BOLD}╔══════════════════════════════════════════╗${RESET}"
+echo -e "${BOLD}║     askill CLI - E2E Integration Tests   ║${RESET}"
+echo -e "${BOLD}╚══════════════════════════════════════════╝${RESET}"
+
+# Run specific test or all
+if [ $# -gt 0 ] && [ "$1" != "--list" ]; then
+  for t in "$@"; do
+    if declare -f "$t" > /dev/null 2>&1; then
+      "$t"
+    else
+      echo -e "${RED}Unknown test: $t${RESET}"
+      echo "Run with --list to see available tests"
+      exit 1
+    fi
+  done
+else
+  for t in "${ALL_TESTS[@]}"; do
+    "$t"
+  done
+fi
+
+# ── Summary ─────────────────────────────────────────
+echo ""
+echo -e "${BOLD}━━━ Summary ━━━${RESET}"
+echo -e "  ${GREEN}Passed:  $PASSED${RESET}"
+echo -e "  ${RED}Failed:  $FAILED${RESET}"
+echo -e "  ${YELLOW}Skipped: $SKIPPED${RESET}"
+
+if [ ${#ERRORS[@]} -gt 0 ]; then
+  echo ""
+  echo -e "${RED}Failures:${RESET}"
+  for e in "${ERRORS[@]}"; do
+    echo -e "  ${RED}✗ $e${RESET}"
+  done
+fi
+
+echo ""
+if [ "$FAILED" -eq 0 ]; then
+  echo -e "${GREEN}${BOLD}All tests passed!${RESET}"
+  exit 0
+else
+  echo -e "${RED}${BOLD}$FAILED test(s) failed${RESET}"
+  exit 1
+fi

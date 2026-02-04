@@ -17,6 +17,9 @@
     "build:binary": "bun build ./src/cli.ts --compile --outfile ./dist/askill",
     "build:all": "npm run build && npm run build:binary",
     "test": "npx tsx --test src/**/*.test.ts",
+    "test:e2e": "docker build -f Dockerfile.test -t askill-test . && docker run --rm askill-test",
+    "test:e2e:build": "docker build -f Dockerfile.test -t askill-test .",
+    "test:e2e:run": "docker run --rm askill-test",
     "prepublishOnly": "npm run build"
   },
   "keywords": [

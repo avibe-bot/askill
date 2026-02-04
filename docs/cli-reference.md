@@ -14,18 +14,20 @@ npx @askill/cli <command>
 
 ## Commands Overview
 
-| Command | Description |
-|---------|-------------|
-| `askill add` | Install a skill |
-| `askill remove` | Remove a skill |
-| `askill list` | List installed skills |
-| `askill find` | Search for skills |
-| `askill info` | Show skill details |
-| `askill run` | Run a skill command |
-| `askill update` | Update skills |
-| `askill login` | Authenticate with GitHub |
-| `askill publish` | Publish a skill |
-| `askill validate` | Validate a SKILL.md |
+| Command | Status | Description |
+|---------|--------|-------------|
+| `askill add` | Implemented | Install a skill |
+| `askill remove` | Implemented | Remove a skill |
+| `askill list` | Implemented | List installed skills |
+| `askill find` | Implemented | Search for skills |
+| `askill info` | Implemented | Show skill details |
+| `askill update` | Implemented | Update askill CLI |
+| `askill run` | Planned | Run a skill command |
+| `askill login` | Planned | Authenticate with GitHub |
+| `askill logout` | Planned | Remove stored credentials |
+| `askill publish` | Planned | Publish a skill |
+| `askill validate` | Planned | Validate a SKILL.md |
+| `askill token` | Planned | Manage authentication tokens |
 
 ---
 
@@ -43,38 +45,51 @@ askill add <slug> [options]
 
 | Argument | Description |
 |----------|-------------|
-| `slug` | Skill identifier (e.g., `@scope/name` or `gh:owner/repo/path`) |
+| `slug` | Skill identifier (e.g., `gh:owner/repo@name` or `gh:owner/repo/path`) |
 
 ### Options
 
 | Option | Description |
 |--------|-------------|
-| `-g, --global` | Install globally (user-level) |
+| `-g, --global` | Install globally (user-level, e.g., `~/.claude/skills/`) |
 | `-a, --agent <agents...>` | Install to specific agents only |
-| `-y, --yes` | Skip confirmation prompts |
+| `-y, --yes` | Skip confirmation prompts (non-interactive mode) |
 | `--copy` | Copy files instead of symlink |
 
 ### Examples
 
 ```bash
-# Install a published skill
-askill add @anthropic/memory
+# Install from GitHub (short format)
+askill add gh:facebook/react@extract-errors
 
-# Install from GitHub
+# Install from GitHub (path format)
 askill add gh:facebook/react/scripts/error-codes
 
-# Install with specific version
-askill add @anthropic/memory@^1.0.0
+# List skills in a repo and select
+askill add gh:facebook/react
 
 # Install globally
-askill add @anthropic/memory -g
+askill add gh:owner/repo@skill -g
 
 # Install to specific agents
-askill add @anthropic/memory --agent claude-code cursor
+askill add gh:owner/repo@skill --agent claude-code cursor
 
-# Non-interactive install
-askill add @anthropic/memory -y
+# Non-interactive install (for CI/agents)
+askill add gh:owner/repo@skill -y
+
+# Non-interactive with specific agents
+askill add gh:owner/repo@skill -a claude-code opencode -y
 ```
+
+### Non-Interactive Mode
+
+When using `-y` / `--yes`:
+- Skips all confirmation prompts
+- Uses preferred agents from config (if previously saved)
+- Falls back to all detected agents if no preferences saved
+- Combined with `-a` to specify exact agents
+
+This is ideal for CI pipelines or when agents install skills programmatically.
 
 ---
 
@@ -85,7 +100,7 @@ Remove an installed skill.
 ### Usage
 
 ```bash
-askill remove <slug> [options]
+askill remove <name> [options]
 ```
 
 ### Options
@@ -93,16 +108,16 @@ askill remove <slug> [options]
 | Option | Description |
 |--------|-------------|
 | `-g, --global` | Remove from global installation |
-| `-y, --yes` | Skip confirmation |
+| `-y, --yes` | Skip confirmation (Planned) |
 
 ### Examples
 
 ```bash
-# Remove a skill
-askill remove @anthropic/memory
+# Remove a skill (project-level)
+askill remove extract-errors
 
 # Remove global skill
-askill remove @anthropic/memory -g
+askill remove extract-errors -g
 ```
 
 ---
@@ -122,7 +137,7 @@ askill list [options]
 | Option | Description |
 |--------|-------------|
 | `-g, --global` | List global skills only |
-| `--json` | Output as JSON |
+| `--json` | Output as JSON (Planned) |
 
 ### Examples
 
@@ -132,9 +147,6 @@ askill list
 
 # List global skills
 askill list -g
-
-# Output as JSON
-askill list --json
 ```
 
 ### Output
@@ -142,13 +154,13 @@ askill list --json
 ```
 Installed skills:
 
-  @anthropic/memory (v1.2.0)
-    Agents: Claude Code, Cursor
-    Location: ~/.askill/skills/@anthropic/memory
+  extract-errors [project]
+    Agents: Claude Code, OpenCode
+    .agents/skills/extract-errors
 
-  gh:facebook/react/scripts/error-codes
+  git-workflow [global]
     Agents: Claude Code
-    Location: ~/.askill/skills/gh/facebook/react/scripts/error-codes
+    ~/.agents/skills/git-workflow
 ```
 
 ---
@@ -167,9 +179,9 @@ askill find [query] [options]
 
 | Option | Description |
 |--------|-------------|
-| `--tag <tag>` | Filter by tag |
-| `--limit <n>` | Number of results (default: 20) |
-| `--json` | Output as JSON |
+| `--tag <tag>` | Filter by tag (Planned) |
+| `--limit <n>` | Number of results (default: 20) (Planned) |
+| `--json` | Output as JSON (Planned) |
 
 ### Examples
 
@@ -180,11 +192,11 @@ askill find
 # Search by keyword
 askill find memory
 
-# Filter by tag
-askill find --tag git
+# Search by multiple keywords
+askill find code review
 
-# Combine filters
-askill find code review --tag quality
+# Filter by tag (Planned)
+askill find --tag git
 ```
 
 ---
@@ -202,40 +214,39 @@ askill info <slug>
 ### Examples
 
 ```bash
-askill info @anthropic/memory
+askill info gh:facebook/react@extract-errors
 ```
 
 ### Output
 
 ```
-@anthropic/memory
+extract-errors
 
-  Persistent memory management for AI agents
+  Extract error codes from React codebase
 
-  Author:       anthropic
-  Version:      1.2.0
-  License:      MIT
-  Stars:        1,234
-  Downloads:    45,678
-  Tags:         memory, context, persistence
-  Repository:   https://github.com/anthropic/skills
+  Owner:      facebook
+  Repository: facebook/react
+  Path:       scripts/error-codes
+  Stars:      230,000
 
-  Dependencies:
-    @askill/storage@^1.0.0
-
-  Commands:
-    save     - Save a key-value pair
-    recall   - Recall a saved value
-    forget   - Delete a saved value
-    list     - List all saved keys
-
-  Install:
-    askill add @anthropic/memory
+  Install:    askill add gh:facebook/react@extract-errors
 ```
 
 ---
 
-## askill run
+## askill update
+
+Update the askill CLI itself.
+
+### Usage
+
+```bash
+askill update
+```
+
+---
+
+## askill run (Planned)
 
 Execute a command defined by a skill.
 
@@ -275,39 +286,7 @@ askill run @anthropic/memory:_setup
 
 ---
 
-## askill update
-
-Update installed skills.
-
-### Usage
-
-```bash
-askill update [slug] [options]
-```
-
-### Options
-
-| Option | Description |
-|--------|-------------|
-| `-g, --global` | Update global skills |
-| `--all` | Update all skills |
-
-### Examples
-
-```bash
-# Update a specific skill
-askill update @anthropic/memory
-
-# Update all skills
-askill update --all
-
-# Update global skills
-askill update --all -g
-```
-
----
-
-## askill login
+## askill login (Planned)
 
 Authenticate with GitHub for publishing.
 
@@ -323,15 +302,9 @@ askill login
 2. Authorizes askill to read your identity
 3. Stores credentials locally
 
-### Examples
-
-```bash
-askill login
-```
-
 ---
 
-## askill logout
+## askill logout (Planned)
 
 Remove stored credentials.
 
@@ -343,7 +316,7 @@ askill logout
 
 ---
 
-## askill publish
+## askill publish (Planned)
 
 Publish a skill to askill.sh.
 
@@ -379,7 +352,7 @@ askill publish --dry-run
 
 ---
 
-## askill validate
+## askill validate (Planned)
 
 Validate a SKILL.md file.
 
@@ -424,7 +397,7 @@ askill validate ./my-skill/SKILL.md
 
 ---
 
-## askill token
+## askill token (Planned)
 
 Manage authentication tokens.
 
@@ -465,8 +438,8 @@ These options work with all commands:
 |--------|-------------|
 | `-h, --help` | Show help |
 | `-v, --version` | Show version |
-| `--verbose` | Verbose output |
-| `--no-color` | Disable colored output |
+| `--verbose` | Verbose output (Planned) |
+| `--no-color` | Disable colored output (Planned) |
 
 ---
 
@@ -474,24 +447,57 @@ These options work with all commands:
 
 | Variable | Description |
 |----------|-------------|
-| `ASKILL_TOKEN` | Authentication token (for CI) |
-| `ASKILL_HOME` | Override askill home directory |
-| `ASKILL_REGISTRY` | Override registry URL |
-| `NO_COLOR` | Disable colored output |
+| `XDG_CONFIG_HOME` | Override config home (default: `~/.config`) |
+| `CODEX_HOME` | Override Codex home (default: `~/.codex`) |
+| `CLAUDE_CONFIG_DIR` | Override Claude config (default: `~/.claude`) |
+| `ASKILL_TOKEN` | Authentication token for CI (Planned) |
+| `ASKILL_REGISTRY` | Override registry URL (Planned) |
+| `NO_COLOR` | Disable colored output (Planned) |
 
 ---
 
 ## Configuration File
 
-askill stores configuration in `~/.askill/config.json`:
+askill stores user preferences in `~/.config/askill/config.json`:
 
 ```json
 {
-  "registry": "https://askill.sh/api/v1",
-  "defaultAgents": ["claude-code", "cursor"],
-  "globalInstall": false
+  "preferredAgents": ["claude-code", "opencode"],
+  "lastUpdated": "2024-01-15T10:30:00.000Z"
 }
 ```
+
+The `preferredAgents` list is automatically updated when you complete an installation, remembering your agent selections for next time.
+
+---
+
+## Skills Installation Paths
+
+Skills are installed to agent-specific directories:
+
+### Project-Level (default)
+
+| Agent | Path |
+|-------|------|
+| Claude Code | `.claude/skills/<skill-name>/` |
+| OpenCode | `.opencode/skills/<skill-name>/` |
+| Cursor | `.cursor/skills/<skill-name>/` |
+| Windsurf | `.windsurf/skills/<skill-name>/` |
+| Codex | `.codex/skills/<skill-name>/` |
+| Canonical | `.agents/skills/<skill-name>/` |
+
+### Global (`-g` flag)
+
+| Agent | Path |
+|-------|------|
+| Claude Code | `~/.claude/skills/<skill-name>/` |
+| OpenCode | `~/.config/opencode/skills/<skill-name>/` |
+| Cursor | `~/.cursor/skills/<skill-name>/` |
+| Windsurf | `~/.codeium/windsurf/skills/<skill-name>/` |
+| Codex | `~/.codex/skills/<skill-name>/` |
+| Canonical | `~/.agents/skills/<skill-name>/` |
+
+By default, skills are written to the canonical location (`.agents/skills/`) and symlinked to each agent's directory for deduplication.
 
 ---
 
@@ -501,10 +507,10 @@ askill stores configuration in `~/.askill/config.json`:
 |------|---------|
 | 0 | Success |
 | 1 | General error |
-| 2 | Invalid arguments |
-| 3 | Skill not found |
-| 4 | Authentication required |
-| 5 | Network error |
+| 2 | Invalid arguments (Planned) |
+| 3 | Skill not found (Planned) |
+| 4 | Authentication required (Planned) |
+| 5 | Network error (Planned) |
 
 ---
 

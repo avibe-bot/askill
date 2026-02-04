@@ -13,14 +13,14 @@ askill is a universal package manager for AI agent skills. It enables agents to 
 # Install
 npm install -g @askill/cli
 
-# Install a skill
-askill add @anthropic/memory
+# Install a skill from GitHub
+askill add gh:owner/repo@skill-name
 
 # Search for skills
 askill find code review
 
-# Run a skill command
-askill run @anthropic/memory:save --key name --value "John"
+# List installed skills
+askill list
 ```
 
 ## Table of Contents
@@ -59,11 +59,14 @@ askill --version
 ### Install a Skill
 
 ```bash
-# Published skill
-askill add @anthropic/memory
+# From GitHub (short format)
+askill add gh:facebook/react@extract-errors
 
-# From GitHub (indexed)
+# From GitHub (path format)
 askill add gh:facebook/react/scripts/error-codes
+
+# Non-interactive (for CI/agents)
+askill add gh:owner/repo@skill -y
 ```
 
 ### Search Skills
@@ -80,9 +83,9 @@ askill list
 askill list -g  # global only
 ```
 
-### Run Skill Commands
+### Run Skill Commands (Planned)
 
-Skills can define commands. Run them with:
+Skills can define commands. When implemented, run them with:
 
 ```bash
 askill run <skill>:<command> [args]
@@ -149,7 +152,7 @@ Skills are defined by a `SKILL.md` file:
 name: my-skill
 description: What this skill does
 version: 1.0.0
-skills:
+dependencies:
   - @dependency/one@^1.0.0
 commands:
   build:
@@ -169,9 +172,9 @@ See [SKILL.md Specification](./docs/skill-spec.md) for complete details.
 ### Creating a Skill
 
 1. Create a `SKILL.md` file with frontmatter and instructions
-2. Test locally: `askill install ./my-skill`
-3. Validate: `askill validate SKILL.md`
-4. Publish: `askill login && askill publish`
+2. Test locally: `askill add ./my-skill`
+3. Validate: `askill validate SKILL.md` (Planned)
+4. Publish: `askill login && askill publish` (Planned)
 
 See [Publishing Guide](./docs/publishing.md) for details.
 
@@ -196,6 +199,7 @@ askill/
 │   ├── cli.ts              # Main entry point
 │   ├── api.ts              # API client
 │   ├── installer.ts        # Skill installation
+│   ├── config.ts           # User preferences
 │   ├── updater.ts          # Self-update
 │   └── constants.ts        # Config and agent definitions
 ├── docs/                   # Documentation

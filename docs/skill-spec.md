@@ -104,12 +104,12 @@ Rules:
 - Max 5 tags
 - Each tag max 20 characters
 
-#### `skills`
+#### `dependencies`
 
 Dependencies on other skills.
 
 ```yaml
-skills:
+dependencies:
   - @anthropic/tools@^1.0.0
   - @askill/git@^2.0.0
   - gh:owner/repo/path
@@ -184,7 +184,7 @@ tags:
   - code-review
   - linting
   - quality
-skills:
+dependencies:
   - @askill/git@^1.0.0
   - @askill/diff@^1.0.0
 commands:

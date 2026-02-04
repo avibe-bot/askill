@@ -106,9 +106,9 @@ askill add gh:facebook/react/scripts/error-codes
 # The gh: prefix indicates an indexed (non-published) skill
 ```
 
-## Running Skill Commands
+### Running Skill Commands (Planned)
 
-Some skills provide commands. Run them with:
+Some skills provide commands. When implemented, run them with:
 
 ```bash
 askill run <skill>:<command> [args]
@@ -131,7 +131,7 @@ askill list
 #   gh:facebook/react/scripts/error-codes - Claude Code
 ```
 
-### Update Skills
+### Update Skills (Planned)
 
 ```bash
 # Update a specific skill

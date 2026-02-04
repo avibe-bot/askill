@@ -24,7 +24,11 @@ Skills are capabilities installed to enhance your abilities. Each skill:
 
 ## Finding Installed Skills
 
-Skills are installed in the `.askill/skills/` directory (project-level) or `~/.askill/skills/` (global).
+Skills are installed in agent-specific directories:
+
+- **Project-level**: `.{agent}/skills/` (e.g., `.claude/skills/`, `.opencode/skills/`)
+- **Global-level**: `~/.{agent}/skills/` or `~/.config/{agent}/skills/`
+- **Canonical location**: `.agents/skills/` (symlinked to agent directories)
 
 To see what skills are available:
 
@@ -32,9 +36,10 @@ To see what skills are available:
 askill list
 ```
 
-Or check the skills directory directly:
-- Project skills: `./.askill/skills/`
-- Global skills: `~/.askill/skills/`
+Or check the skills directory directly for your agent:
+- Claude Code: `.claude/skills/` or `~/.claude/skills/`
+- OpenCode: `.opencode/skills/` or `~/.config/opencode/skills/`
+- Cursor: `.cursor/skills/` or `~/.cursor/skills/`
 
 ## Reading Skill Instructions
 
@@ -49,11 +54,11 @@ Example:
 User: "Help me manage my memory across sessions"
 
 You: Let me check for memory-related skills...
-     [Read .askill/skills/@anthropic/memory/SKILL.md]
-     Found @anthropic/memory skill. Following its instructions...
+     [Read .claude/skills/memory/SKILL.md]
+     Found memory skill. Following its instructions...
 ```
 
-## Running Skill Commands
+## Running Skill Commands (Planned)
 
 Skills may define commands. Run them with:
 
@@ -115,10 +120,10 @@ You should:
 
 ## Skill Dependencies
 
-Skills can depend on other skills. The `skills:` field in frontmatter lists dependencies:
+Skills can depend on other skills. The `dependencies:` field in frontmatter lists dependencies:
 
 ```yaml
-skills:
+dependencies:
   - @anthropic/tools@^1.0.0
   - @askill/git@^2.0.0
 ```
@@ -128,6 +133,23 @@ These are automatically installed by askill. If a dependency is missing, suggest
 ```bash
 askill add <skill-slug>
 ```
+
+## Installing Skills Non-Interactively
+
+When you (as an agent) need to install a skill programmatically:
+
+```bash
+# Install with all prompts skipped, uses your preferred agents
+askill add gh:owner/repo@skill -y
+
+# Install to specific agents
+askill add gh:owner/repo@skill -a claude-code opencode -y
+
+# Install globally
+askill add gh:owner/repo@skill -g -y
+```
+
+The `-y` flag is essential for non-interactive execution.
 
 ## Best Practices
 
@@ -144,7 +166,7 @@ If a skill provides commands, prefer using them over improvising:
 askill run @skill/name:action
 
 # Less ideal: Manually running scripts
-python ~/.askill/skills/@skill/name/scripts/action.py
+python .claude/skills/skill-name/scripts/action.py
 ```
 
 ### 3. Handle Errors Gracefully
@@ -175,14 +197,14 @@ askill run @scope/skillname:_setup
 
 The skill might not be installed:
 ```bash
-askill add @scope/skillname
+askill add gh:owner/repo@skillname -y
 ```
 
 ### "Permission denied"
 
 The script might need execute permission:
 ```bash
-chmod +x ~/.askill/skills/@scope/skillname/scripts/script.sh
+chmod +x .claude/skills/skill-name/scripts/script.sh
 ```
 
 ## Example Workflow
@@ -190,18 +212,19 @@ chmod +x ~/.askill/skills/@scope/skillname/scripts/script.sh
 User: "Review my code changes"
 
 You:
-1. Check for relevant skills: `askill list` or check `.askill/skills/`
-2. Find `@anthropic/code-reviewer` is installed
-3. Read `.askill/skills/@anthropic/code-reviewer/SKILL.md`
+1. Check for relevant skills: `askill list` or check `.claude/skills/`
+2. Find `code-reviewer` is installed
+3. Read `.claude/skills/code-reviewer/SKILL.md`
 4. Follow instructions:
    - Check prerequisites (Python 3.10+)
-   - Run command: `askill run @anthropic/code-reviewer:review`
+   - Run command: `askill run code-reviewer:review`
 5. Present results to user
 
 ## Summary
 
-- **Discover**: `askill list` or check skills directory
+- **Discover**: `askill list` or check your agent's skills directory
 - **Learn**: Read the skill's SKILL.md
-- **Execute**: `askill run skill:command`
+- **Execute**: `askill run skill:command` (when implemented)
 - **Setup**: `askill run skill:_setup` if needed
+- **Install**: `askill add <slug> -y` for non-interactive installation
 - **Troubleshoot**: Check prerequisites and dependencies

@@ -3,10 +3,18 @@
 // askill - Agent Skill Package Manager
 // Install AI agent skills from askill.sh
 
-import { VERSION, RESET, BOLD, DIM, CYAN, GREEN, YELLOW, RED, GRAY, agents, type AgentType } from './constants.ts';
+import { VERSION, RESET, BOLD, DIM, CYAN, GREEN, YELLOW, RED, GRAY, agents, AGENTS_DIR, SKILLS_SUBDIR, type AgentType } from './constants.ts';
 import { api, APIError, type Skill, type RepoSkill } from './api.ts';
-import { installSkill, detectInstalledAgents, listInstalledSkills, removeSkill, isSkillInstalled, type InstallMode } from './installer.ts';
+import { installSkill, installSkillFromDir, detectInstalledAgents, listInstalledSkills, removeSkill, isSkillInstalled, sanitizeName, type InstallMode } from './installer.ts';
 import { checkForUpdates, selfUpdate } from './updater.ts';
+import { getPreferredAgents, savePreferredAgents } from './config.ts';
+import { extractDependencies, parseDependency, dependencyToSlug, parseSkillMd } from './parser.ts';
+import { parseSource, type ParsedSource } from './source-parser.ts';
+import { discoverSkills, filterSkills, type DiscoveredSkill } from './discover.ts';
+import { cloneRepo, cleanupTempDir, GitCloneError } from './git.ts';
+import { addSkillToLock, removeSkillFromLock, fetchSkillFolderHash, saveLastSelectedAgents, getLastSelectedAgents, getAllLockedSkills } from './lock.ts';
+import { join } from 'path';
+import { homedir } from 'os';
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
 
@@ -41,6 +49,7 @@ function showBanner(): void {
   console.log(`  ${DIM}$${RESET} askill find ${DIM}[query]${RESET}      ${DIM}Search for skills${RESET}`);
   console.log(`  ${DIM}$${RESET} askill list${RESET}              ${DIM}List installed skills${RESET}`);
   console.log(`  ${DIM}$${RESET} askill remove ${DIM}<skill>${RESET}   ${DIM}Remove a skill${RESET}`);
+  console.log(`  ${DIM}$${RESET} askill init${RESET}              ${DIM}Create a new skill${RESET}`);
   console.log(`  ${DIM}$${RESET} askill run ${DIM}<skill:cmd>${RESET}  ${DIM}Run a skill command${RESET}`);
   console.log();
   console.log(`${DIM}Browse skills at${RESET} ${CYAN}https://askill.sh${RESET}`);
@@ -56,19 +65,28 @@ ${BOLD}Commands:${RESET}
   remove, rm <skill>       Remove an installed skill
   list, ls                 List installed skills
   find, search, s [query]  Search for skills
-  info <skill>          Show skill details
-  run <skill:cmd>       Run a skill command
-  update                Update askill CLI
+  info <skill>             Show skill details
+  init [dir]               Create a new SKILL.md template
+  check                    Check installed skills for updates
+  update [skill]           Update installed skills
+  run <skill:cmd>          Run a skill command
+  self-update              Update askill CLI
 
-${BOLD}Skill Slug Formats (Indexed from GitHub):${RESET}
-  gh:owner/repo@name                  Short format (if name unique in repo)
-  gh:owner/repo/path                  Full path format
+${BOLD}Skill Source Formats:${RESET}
+  owner/repo                          All skills from a GitHub repo
+  owner/repo@skill-name               Specific skill by name
+  owner/repo/path/to/skill            Specific skill by path
+  https://github.com/owner/repo       Full GitHub URL
+  ./local/path                        Local directory
+  gh:owner/repo@skill-name            Explicit GitHub prefix (optional)
 
 ${BOLD}Install Options:${RESET}
   -g, --global          Install globally (user-level)
   -a, --agent <agents>  Install to specific agents
   -y, --yes             Skip confirmation prompts
   --copy                Copy files instead of symlink
+  -l, --list            Preview skills in a repo without installing
+  --all                 Install all discovered skills (skip selection)
 
 ${BOLD}Run Options:${RESET}
   askill run <skill>:<command>      Run a skill's command
@@ -78,11 +96,12 @@ ${BOLD}Options:${RESET}
   --version, -v         Show version number
 
 ${BOLD}Examples:${RESET}
-  ${DIM}$${RESET} askill add gh:facebook/react@extract-errors
-  ${DIM}$${RESET} askill add gh:facebook/react/scripts/errors
+  ${DIM}$${RESET} askill add anthropic/courses@prompt-eng
+  ${DIM}$${RESET} askill add anthropic/courses
+  ${DIM}$${RESET} askill add ./my-skills/custom-skill
   ${DIM}$${RESET} askill find memory
   ${DIM}$${RESET} askill list -g
-  ${DIM}$${RESET} askill info gh:facebook/react@extract-errors
+  ${DIM}$${RESET} askill info gh:anthropic/courses@prompt-eng
 
 ${DIM}Browse more at${RESET} ${CYAN}https://askill.sh${RESET}
 `);
@@ -92,71 +111,13 @@ ${DIM}Browse more at${RESET} ${CYAN}https://askill.sh${RESET}
 // Install Command
 // ============================================
 
-/**
- * Parse skill identifier to determine the format:
- * 
- * Indexed from GitHub (gh: prefix):
- * - "gh:owner/repo@name" -> { type: 'gh-at', owner, repo, skill }
- * - "gh:owner/repo/path" -> { type: 'gh-path', owner, repo, path }
- * - "gh:owner/repo"      -> { type: 'gh-repo', owner, repo }
- * 
- * Legacy formats (without gh: prefix, for backward compatibility):
- * - "owner/repo@name"    -> { type: 'gh-at', owner, repo, skill }
- * - "owner/repo/path"    -> { type: 'gh-path', owner, repo, path }
- * - "owner/repo"         -> { type: 'gh-repo', owner, repo }
- */
-interface SkillIdentifier {
-  type: 'gh-at' | 'gh-path' | 'gh-repo';
-  owner: string;
-  repo: string;
-  skill?: string;  // For gh:owner/repo@skill format
-  path?: string;   // For gh:owner/repo/path format
-}
-
-function parseSkillIdentifier(input: string): SkillIdentifier {
-  // Remove gh: prefix if present
-  const normalized = input.startsWith('gh:') ? input.slice(3) : input;
-
-  // Check for @ format: owner/repo@skill-name
-  if (normalized.includes('@')) {
-    const [repoPath, skillName] = normalized.split('@');
-    const parts = repoPath.split('/');
-    if (parts.length >= 2) {
-      return { 
-        type: 'gh-at', 
-        owner: parts[0], 
-        repo: parts[1], 
-        skill: skillName 
-      };
-    }
-  }
-
-  const parts = normalized.split('/');
-
-  // Two parts: owner/repo
-  if (parts.length === 2) {
-    return { type: 'gh-repo', owner: parts[0], repo: parts[1] };
-  }
-
-  // Three or more parts: owner/repo/path...
-  if (parts.length >= 3) {
-    return { 
-      type: 'gh-path', 
-      owner: parts[0], 
-      repo: parts[1],
-      path: parts.slice(2).join('/')
-    };
-  }
-
-  // Fallback: treat as repo (shouldn't happen with valid input)
-  return { type: 'gh-repo', owner: parts[0] || '', repo: parts[1] || '' };
-}
-
 interface InstallOptions {
   global?: boolean;
   agent?: string[];
   yes?: boolean;
   copy?: boolean;
+  list?: boolean;
+  all?: boolean;
 }
 
 function parseInstallOptions(args: string[]): { skillName: string; options: InstallOptions } {
@@ -172,6 +133,10 @@ function parseInstallOptions(args: string[]): { skillName: string; options: Inst
       options.yes = true;
     } else if (arg === '--copy') {
       options.copy = true;
+    } else if (arg === '-l' || arg === '--list') {
+      options.list = true;
+    } else if (arg === '--all') {
+      options.all = true;
     } else if (arg === '-a' || arg === '--agent') {
       options.agent = [];
       while (i + 1 < args.length && !args[i + 1].startsWith('-')) {
@@ -186,16 +151,169 @@ function parseInstallOptions(args: string[]): { skillName: string; options: Inst
   return { skillName, options };
 }
 
+/**
+ * Resolve skills via Git Clone (primary) or askill.sh API (fallback).
+ * Returns discovered skills from a cloned repo, or falls back to API.
+ */
+async function resolveSkills(
+  source: string,
+  spinner: ReturnType<typeof p.spinner>,
+  options: InstallOptions,
+): Promise<{
+  skills: DiscoveredSkill[];
+  parsed: ParsedSource;  // Source metadata for lock file
+  tempDir?: string;  // Must be cleaned up after install
+}> {
+  const parsed = parseSource(source);
+
+  // Local path: discover directly
+  if (parsed.type === 'local') {
+    spinner.start(`Scanning ${source}...`);
+    const skills = await discoverSkills(parsed.localPath!);
+    spinner.stop(`Found ${skills.length} skill(s) in ${pc.cyan(source)}`);
+    return { skills, parsed };
+  }
+
+  // Git-based source: try clone first
+  if (parsed.type === 'github' || parsed.type === 'git') {
+    spinner.start(`Cloning ${parsed.owner ? `${parsed.owner}/${parsed.repo}` : parsed.url}...`);
+
+    try {
+      const tempDir = await cloneRepo(parsed.url, parsed.ref);
+      spinner.stop('Repository cloned');
+
+      spinner.start('Discovering skills...');
+      let skills = await discoverSkills(tempDir, parsed.subpath);
+
+      // If @skill filter, apply it
+      if (parsed.skillFilter) {
+        skills = filterSkills(skills, [parsed.skillFilter]);
+      }
+
+      spinner.stop(`Found ${skills.length} skill(s)`);
+      return { skills, parsed, tempDir };
+    } catch (error) {
+      // Clone failed - try API fallback for GitHub sources
+      if (parsed.type === 'github' && parsed.owner && parsed.repo) {
+        const errorMsg = error instanceof GitCloneError ? error.message : 'Clone failed';
+        spinner.stop(pc.yellow(`Git clone failed, trying askill.sh...`));
+
+        try {
+          return await resolveSkillsViaApi(parsed, spinner, options);
+        } catch (apiError) {
+          // Both failed
+          spinner.stop(pc.red('Failed'));
+          p.log.error(`Git clone: ${errorMsg}`);
+          p.log.error(`API fallback: ${apiError instanceof Error ? apiError.message : 'Failed'}`);
+          p.outro(pc.red('Could not resolve skill'));
+          process.exit(1);
+        }
+      }
+
+      // Non-GitHub source, no fallback
+      spinner.stop(pc.red('Clone failed'));
+      if (error instanceof GitCloneError) {
+        p.log.error(error.message);
+      }
+      p.outro(pc.red('Could not clone repository'));
+      process.exit(1);
+    }
+  }
+
+  // Should not reach here
+  return { skills: [], parsed };
+}
+
+/**
+ * Fallback: resolve skills via askill.sh API (only SKILL.md content, no scripts/)
+ */
+async function resolveSkillsViaApi(
+  parsed: ParsedSource,
+  spinner: ReturnType<typeof p.spinner>,
+  options: InstallOptions,
+): Promise<{ skills: DiscoveredSkill[]; parsed: ParsedSource }> {
+  const { owner, repo, skillFilter, subpath } = parsed;
+
+  if (skillFilter) {
+    // owner/repo@skill
+    const slug = `${owner}/${repo}@${skillFilter}`;
+    spinner.start(`Fetching ${slug} from askill.sh...`);
+    const skill = await api.getSkill(slug);
+    const content = await api.getSkillRaw(slug);
+    spinner.stop(`Found: ${pc.cyan(skill.name)}`);
+
+    return {
+      skills: [{
+        name: skill.name || 'unknown',
+        description: skill.description || '',
+        path: '',  // No local path (API-only)
+        rawContent: content,
+        frontmatter: { name: skill.name || undefined, description: skill.description || undefined },
+      }],
+      parsed,
+    };
+  }
+
+  if (subpath) {
+    // owner/repo/path
+    const slug = `${owner}/${repo}/${subpath}`;
+    spinner.start(`Fetching ${slug} from askill.sh...`);
+    const skill = await api.getSkill(slug);
+    const skillSlug = skill.owner && skill.repo && skill.name
+      ? `${skill.owner}/${skill.repo}@${skill.name}`
+      : String(skill.id);
+    const content = await api.getSkillRaw(skillSlug);
+    spinner.stop(`Found: ${pc.cyan(skill.name)}`);
+
+    return {
+      skills: [{
+        name: skill.name || 'unknown',
+        description: skill.description || '',
+        path: '',
+        rawContent: content,
+        frontmatter: { name: skill.name || undefined, description: skill.description || undefined },
+      }],
+      parsed,
+    };
+  }
+
+  // owner/repo - list all
+  spinner.start(`Fetching skills from ${owner}/${repo} on askill.sh...`);
+  const repoData = await api.getRepoSkills(owner!, repo!);
+  spinner.stop(`Found ${repoData.skills.length} skill(s)`);
+
+  const results: DiscoveredSkill[] = [];
+  for (const s of repoData.skills) {
+    const slug = `${owner}/${repo}@${s.name}`;
+    try {
+      const content = await api.getSkillRaw(slug);
+      results.push({
+        name: s.name || 'unknown',
+        description: s.description || '',
+        path: '',
+        rawContent: content,
+        frontmatter: { name: s.name || undefined, description: s.description || undefined },
+      });
+    } catch {
+      // Skip skills we can't fetch
+    }
+  }
+
+  return { skills: results, parsed };
+}
+
 async function runInstall(args: string[]): Promise<void> {
   const { skillName, options } = parseInstallOptions(args);
 
   if (!skillName) {
     console.log(`${RED}Error: Missing skill identifier${RESET}`);
-    console.log(`Usage: askill add <skill>`);
+    console.log(`Usage: askill add <source>`);
     console.log(`\nFormats supported:`);
-    console.log(`  askill add gh:facebook/react@extract-errors  ${DIM}# short format${RESET}`);
-    console.log(`  askill add gh:facebook/react/scripts/errors  ${DIM}# full path${RESET}`);
-    console.log(`  askill add gh:facebook/react                 ${DIM}# list repo skills${RESET}`);
+    console.log(`  askill add owner/repo                         ${DIM}# all skills from repo${RESET}`);
+    console.log(`  askill add owner/repo@skill-name              ${DIM}# specific skill${RESET}`);
+    console.log(`  askill add owner/repo/path/to/skill           ${DIM}# skill by path${RESET}`);
+    console.log(`  askill add https://github.com/owner/repo      ${DIM}# full GitHub URL${RESET}`);
+    console.log(`  askill add ./local/path                       ${DIM}# local directory${RESET}`);
     process.exit(1);
   }
 
@@ -203,114 +321,68 @@ async function runInstall(args: string[]): Promise<void> {
   p.intro(pc.bgCyan(pc.black(' askill install ')));
 
   const spinner = p.spinner();
-  const identifier = parseSkillIdentifier(skillName);
 
-  let skillsToInstall: Array<{ slug: string; name: string; description: string }> = [];
+  // Step 1: Resolve skills (clone or API)
+  const { skills: discoveredSkills, parsed: sourceParsed, tempDir } = await resolveSkills(skillName, spinner, options);
 
-  // Handle different identifier types
-  if (identifier.type === 'gh-repo') {
-    // List all skills in repo and let user select
-    spinner.start(`Fetching skills from ${identifier.owner}/${identifier.repo}...`);
+  // Ensure tempDir is always cleaned up, even on cancel/error/process.exit
+  const cleanup = async () => {
+    if (tempDir) await cleanupTempDir(tempDir).catch(() => {});
+  };
 
-    try {
-      const repoData = await api.getRepoSkills(identifier.owner, identifier.repo);
-      spinner.stop(`Found ${repoData.skills.length} skill(s) in ${pc.cyan(`${identifier.owner}/${identifier.repo}`)}`);
+  try {
 
-      if (repoData.skills.length === 0) {
-        p.log.warning('No skills found in this repository');
-        p.outro(`Browse skills at ${pc.cyan('https://askill.sh')}`);
-        return;
-      }
-
-      if (repoData.skills.length === 1 || options.yes) {
-        // Single skill or --yes: install all
-        skillsToInstall = repoData.skills.map((s) => ({
-          slug: `${repoData.owner}/${repoData.repo}@${s.name}`,
-          name: s.name || 'unknown',
-          description: s.description || '',
-        }));
-        if (repoData.skills.length === 1) {
-          p.log.info(`Installing: ${pc.cyan(repoData.skills[0].name)}`);
-        } else {
-          p.log.info(`Installing ${repoData.skills.length} skills`);
-        }
-      } else {
-        // Multiple skills: let user select
-        const selected = await p.multiselect({
-          message: 'Select skills to install',
-          options: repoData.skills.map((s) => ({
-            value: s,
-            label: s.name || 'unknown',
-            hint: (s.description || '').slice(0, 60) + ((s.description || '').length > 60 ? '...' : ''),
-          })),
-        });
-
-        if (p.isCancel(selected)) {
-          p.cancel('Installation cancelled');
-          process.exit(0);
-        }
-
-        skillsToInstall = (selected as RepoSkill[]).map((s) => ({
-          slug: `${repoData.owner}/${repoData.repo}@${s.name}`,
-          name: s.name || 'unknown',
-          description: s.description || '',
-        }));
-      }
-    } catch (error) {
-      if (error instanceof APIError && error.status === 404) {
-        spinner.stop(pc.red('Repository not found'));
-        p.outro(pc.red(`Repository "${identifier.owner}/${identifier.repo}" not found on askill.sh`));
-        process.exit(1);
-      }
-      throw error;
-    }
-  } else {
-    // gh-at or gh-path format - resolve to single skill
-    let slug: string;
-
-    if (identifier.type === 'gh-at') {
-      slug = `${identifier.owner}/${identifier.repo}@${identifier.skill}`;
-    } else {
-      // gh-path format
-      slug = `${identifier.owner}/${identifier.repo}/${identifier.path}`;
-    }
-
-    spinner.start(`Fetching skill: ${slug}...`);
-
-    try {
-      const skill = await api.getSkill(slug);
-      spinner.stop(`Found: ${pc.cyan(skill.name)}`);
-
-      // Build slug for fetching raw content
-      const skillSlug = skill.owner && skill.repo && skill.name
-        ? `${skill.owner}/${skill.repo}@${skill.name}`
-        : String(skill.id);
-
-      skillsToInstall = [{
-        slug: skillSlug,
-        name: skill.name || 'unknown',
-        description: skill.description || '',
-      }];
-
-      // Show skill info
-      p.log.info(`${pc.cyan(skill.name)} by ${skill.owner || 'unknown'}`);
-      if (skill.description) {
-        p.log.message(pc.dim(skill.description));
-      }
-    } catch (error) {
-      if (error instanceof APIError && error.status === 404) {
-        spinner.stop(pc.red('Skill not found'));
-        p.outro(pc.red(`Skill "${slug}" not found on askill.sh`));
-        process.exit(1);
-      }
-      throw error;
-    }
+  if (discoveredSkills.length === 0) {
+    p.log.warning('No skills found');
+    p.outro(`Browse skills at ${pc.cyan('https://askill.sh')}`);
+    return;
   }
 
-  if (skillsToInstall.length === 0) {
-    p.log.warning('No skills selected');
-    p.outro('');
+  // --list mode: just show discovered skills and exit
+  if (options.list) {
+    console.log();
+    p.log.info(`Found ${discoveredSkills.length} skill(s) in ${pc.cyan(skillName)}:`);
+    console.log();
+    for (const skill of discoveredSkills) {
+      console.log(`  ${pc.cyan(skill.name)}`);
+      if (skill.description) {
+        console.log(`  ${pc.dim(skill.description.slice(0, 80))}${skill.description.length > 80 ? '...' : ''}`);
+      }
+      if (skill.path) {
+        console.log(`  ${pc.dim('path:')} ${skill.path.replace(tempDir || '', '').replace(/^\//, '')}`);
+      }
+      console.log();
+    }
+    p.outro(`Install with: ${pc.cyan(`askill add ${skillName} --all`)}`);
     return;
+  }
+
+  // Step 2: Let user select skills (if multiple)
+  let skillsToInstall: DiscoveredSkill[];
+
+  if (discoveredSkills.length === 1 || options.yes || options.all) {
+    skillsToInstall = discoveredSkills;
+    if (discoveredSkills.length === 1) {
+      p.log.info(`Installing: ${pc.cyan(discoveredSkills[0].name)}`);
+    } else {
+      p.log.info(`Installing ${discoveredSkills.length} skill(s)`);
+    }
+  } else {
+    const selected = await p.multiselect({
+      message: 'Select skills to install',
+      options: discoveredSkills.map((s) => ({
+        value: s,
+        label: s.name,
+        hint: s.description.slice(0, 60) + (s.description.length > 60 ? '...' : ''),
+      })),
+    });
+
+    if (p.isCancel(selected)) {
+      p.cancel('Installation cancelled');
+      return;
+    }
+
+    skillsToInstall = selected as DiscoveredSkill[];
   }
 
   // Detect agents
@@ -322,12 +394,13 @@ async function runInstall(args: string[]): Promise<void> {
     if (invalidAgents.length > 0) {
       p.log.error(`Invalid agents: ${invalidAgents.join(', ')}`);
       p.log.info(`Valid agents: ${validAgents.slice(0, 10).join(', ')}...`);
-      process.exit(1);
+      return;
     }
     targetAgents = options.agent as AgentType[];
   } else {
     spinner.start('Detecting installed agents...');
     const installedAgents = await detectInstalledAgents();
+    const preferredAgents = (await getLastSelectedAgents()) || (await getPreferredAgents());
     spinner.stop(`Found ${installedAgents.length} agent(s)`);
 
     if (installedAgents.length === 0) {
@@ -345,27 +418,40 @@ async function runInstall(args: string[]): Promise<void> {
 
         if (p.isCancel(selected)) {
           p.cancel('Installation cancelled');
-          process.exit(0);
+          return;
         }
 
         targetAgents = selected as AgentType[];
       }
-    } else if (installedAgents.length === 1 || options.yes) {
+    } else if (installedAgents.length === 1) {
       targetAgents = installedAgents;
       p.log.info(`Installing to: ${targetAgents.map((a) => pc.cyan(agents[a].displayName)).join(', ')}`);
+    } else if (options.yes) {
+      // Non-interactive mode: use preferred agents if available, otherwise all installed
+      const effectiveAgents = preferredAgents
+        ? preferredAgents.filter((a) => installedAgents.includes(a))
+        : [];
+      targetAgents = effectiveAgents.length > 0 ? effectiveAgents : installedAgents;
+      p.log.info(`Installing to: ${targetAgents.map((a) => pc.cyan(agents[a].displayName)).join(', ')}`);
     } else {
+      // Use preferred agents as initial selection if available,
+      // filtered to only include currently installed agents
+      const initialSelection = preferredAgents
+        ? preferredAgents.filter((a) => installedAgents.includes(a))
+        : installedAgents;
+
       const selected = await p.multiselect({
         message: 'Select agents to install to',
         options: installedAgents.map((a) => ({
           value: a,
           label: agents[a].displayName,
         })),
-        initialValues: installedAgents,
+        initialValues: initialSelection.length > 0 ? initialSelection : installedAgents,
       });
 
       if (p.isCancel(selected)) {
         p.cancel('Installation cancelled');
-        process.exit(0);
+        return;
       }
 
       targetAgents = selected as AgentType[];
@@ -386,7 +472,7 @@ async function runInstall(args: string[]): Promise<void> {
 
     if (p.isCancel(scope)) {
       p.cancel('Installation cancelled');
-      process.exit(0);
+      return;
     }
 
     installGlobally = scope as boolean;
@@ -403,34 +489,121 @@ async function runInstall(args: string[]): Promise<void> {
 
     if (p.isCancel(confirmed) || !confirmed) {
       p.cancel('Installation cancelled');
-      process.exit(0);
+      return;
     }
   }
 
   // Install each skill
   spinner.start('Installing...');
 
-  const allResults: Array<{ skill: string; agent: string; success: boolean; error?: string }> = [];
+  const allResults: Array<{ skill: string; agent: string; success: boolean; error?: string; isDependency?: boolean }> = [];
+  const installedNames = new Set<string>(); // Track installed skills to avoid duplicates (normalized keys)
 
-  for (const skillInfo of skillsToInstall) {
-    // Fetch SKILL.md content for each skill
-    let content: string;
-    try {
-      content = await api.getSkillRaw(skillInfo.slug);
-    } catch (error) {
-      for (const agent of targetAgents) {
-        allResults.push({ skill: skillInfo.name, agent, success: false, error: 'Failed to fetch SKILL.md' });
-      }
-      continue;
-    }
+  // Normalize a dependency key for dedup: strip gh: prefix, lowercase
+  const normalizeDepKey = (s: string) => s.replace(/^gh:/, '').toLowerCase();
 
+  // Strip gh: prefix for API calls (API expects owner/repo@name, not gh:owner/repo@name)
+  const toApiSlug = (s: string) => s.replace(/^gh:/, '');
+
+  // Helper: install a single DiscoveredSkill to all target agents
+  async function installOneSkill(
+    skill: DiscoveredSkill,
+    isDependency: boolean,
+  ): Promise<void> {
+    spinner.message(`Installing ${skill.name}...`);
     for (const agent of targetAgents) {
-      const result = await installSkill(skillInfo.name, content, agent, {
-        global: installGlobally,
-        mode: installMode,
-      });
-      allResults.push({ skill: skillInfo.name, agent, ...result });
+      let result: { success: boolean; error?: string };
+
+      if (skill.path) {
+        // Clone-based: copy entire skill directory (includes scripts/, assets/, etc.)
+        result = await installSkillFromDir(skill.name, skill.path, agent, {
+          global: installGlobally,
+          mode: installMode,
+        });
+      } else {
+        // API fallback: only SKILL.md content available
+        result = await installSkill(skill.name, skill.rawContent, agent, {
+          global: installGlobally,
+          mode: installMode,
+        });
+      }
+
+      allResults.push({ skill: skill.name, agent, ...result, isDependency });
     }
+  }
+
+  // Helper: resolve and install dependencies for a skill recursively
+  async function installDependencies(skill: DiscoveredSkill): Promise<void> {
+    const dependencies = extractDependencies(skill.rawContent);
+    if (dependencies.length === 0) return;
+
+    spinner.message(`Resolving dependencies for ${skill.name}...`);
+
+    for (const dep of dependencies) {
+      const parsed = parseDependency(dep);
+      const depSlug = dependencyToSlug(parsed);
+      const depKey = normalizeDepKey(depSlug);
+
+      if (installedNames.has(depKey)) continue;
+      installedNames.add(depKey);  // Mark visited immediately to prevent cycles
+
+      try {
+        // Strip gh: prefix for API calls
+        const apiSlug = toApiSlug(depSlug);
+        const depSkill = await api.getSkill(apiSlug);
+        const depContent = await api.getSkillRaw(apiSlug);
+
+        // Parse the actual frontmatter for consistent metadata
+        const parsedContent = parseSkillMd(depContent);
+        const name = depSkill.name
+          || parsedContent.frontmatter.name
+          || parsed.skill || parsed.name || dep;
+        const description = depSkill.description
+          || parsedContent.frontmatter.description || '';
+
+        const depDiscovered: DiscoveredSkill = {
+          name,
+          description,
+          path: '',  // API-only, no local path
+          rawContent: depContent,
+          frontmatter: parsedContent.frontmatter,
+        };
+
+        // Also register by resolved name to avoid duplicates
+        installedNames.add(normalizeDepKey(name));
+
+        // Recursively install sub-dependencies
+        await installDependencies(depDiscovered);
+
+        // Install the dependency itself
+        await installOneSkill(depDiscovered, true);
+      } catch (error) {
+        // Log dependency resolution failure with error details
+        const errorMsg = error instanceof Error ? error.message : 'Failed to resolve dependency';
+        for (const agent of targetAgents) {
+          allResults.push({
+            skill: `${dep} (dependency of ${skill.name})`,
+            agent,
+            success: false,
+            error: errorMsg,
+            isDependency: true,
+          });
+        }
+      }
+    }
+  }
+
+  // Install all requested skills with their dependencies
+  for (const skill of skillsToInstall) {
+    const key = normalizeDepKey(skill.name);
+    if (installedNames.has(key)) continue;
+    installedNames.add(key);
+
+    // Install dependencies first
+    await installDependencies(skill);
+
+    // Install the skill itself
+    await installOneSkill(skill, false);
   }
 
   spinner.stop('Installation complete');
@@ -440,21 +613,83 @@ async function runInstall(args: string[]): Promise<void> {
   const failed = allResults.filter((r) => !r.success);
 
   if (successful.length > 0) {
+    // Save selected agents as preferred for next time
+    await saveLastSelectedAgents(targetAgents);
+
+    // Write lock entries for all successfully installed skills
+    const installedSkillNames = new Set(successful.map((r) => r.skill));
+    for (const skillName of installedSkillNames) {
+      // Find the DiscoveredSkill for this name (from main install or dependency)
+      const discoveredSkill = skillsToInstall.find((s) => s.name === skillName);
+
+      // Determine source info from parsed source
+      const source = sourceParsed.owner && sourceParsed.repo
+        ? `${sourceParsed.owner}/${sourceParsed.repo}`
+        : sourceParsed.localPath || sourceParsed.url;
+      const sourceType = sourceParsed.type === 'local' ? 'local' : sourceParsed.type;
+      const sourceUrl = sourceParsed.url;
+
+      // Determine skillPath: subpath within the repo
+      let skillPath = '';
+      if (discoveredSkill?.path && tempDir) {
+        // Relative path within cloned repo
+        const relative = discoveredSkill.path.replace(tempDir, '').replace(/^\//, '');
+        if (relative) skillPath = relative;
+      } else if (sourceParsed.subpath) {
+        skillPath = sourceParsed.subpath;
+      } else if (sourceParsed.skillFilter) {
+        skillPath = '';  // @skill filter, path not meaningful
+      }
+
+      // Fetch folder hash for GitHub sources (non-blocking, don't fail install)
+      let skillFolderHash = '';
+      if (sourceType === 'github' && sourceParsed.owner && sourceParsed.repo) {
+        try {
+          skillFolderHash = await fetchSkillFolderHash(
+            `${sourceParsed.owner}/${sourceParsed.repo}`,
+            skillPath
+          );
+        } catch {
+          // Non-critical: hash will be empty, update check won't work for this skill
+        }
+      }
+
+      await addSkillToLock(skillName, {
+        source,
+        sourceType,
+        sourceUrl,
+        skillPath: skillPath || undefined,
+        skillFolderHash,
+      }).catch(() => {
+        // Non-critical: lock file write failure shouldn't fail install
+      });
+    }
+
     console.log();
-    const skillCount = new Set(successful.map((r) => r.skill)).size;
+    const mainSkills = successful.filter((r) => !r.isDependency);
+    const depSkills = successful.filter((r) => r.isDependency);
+    const skillCount = new Set(mainSkills.map((r) => r.skill)).size;
+    const depCount = new Set(depSkills.map((r) => r.skill)).size;
     const agentCount = new Set(successful.map((r) => r.agent)).size;
-    p.log.success(pc.green(`Installed ${skillCount} skill(s) to ${agentCount} agent(s)`));
+    
+    let message = `Installed ${skillCount} skill(s)`;
+    if (depCount > 0) {
+      message += ` + ${depCount} dependenc${depCount === 1 ? 'y' : 'ies'}`;
+    }
+    message += ` to ${agentCount} agent(s)`;
+    p.log.success(pc.green(message));
 
     // Group by skill
     const bySkill = successful.reduce((acc, r) => {
-      if (!acc[r.skill]) acc[r.skill] = [];
-      acc[r.skill].push(r.agent);
+      if (!acc[r.skill]) acc[r.skill] = { agents: [], isDependency: r.isDependency };
+      acc[r.skill].agents.push(r.agent);
       return acc;
-    }, {} as Record<string, string[]>);
+    }, {} as Record<string, { agents: string[]; isDependency?: boolean }>);
 
-    for (const [skill, agentList] of Object.entries(bySkill)) {
-      console.log(`  ${pc.green('✓')} ${skill}`);
-      for (const agent of agentList) {
+    for (const [skill, info] of Object.entries(bySkill)) {
+      const prefix = info.isDependency ? pc.dim('  (dep) ') : '  ';
+      console.log(`${prefix}${pc.green('✓')} ${skill}`);
+      for (const agent of info.agents) {
         const agentName = agents[agent as AgentType]?.displayName || agent;
         console.log(`    ${pc.dim('→')} ${agentName}`);
       }
@@ -472,6 +707,11 @@ async function runInstall(args: string[]): Promise<void> {
 
   console.log();
   p.outro(pc.green('Done!'));
+
+  } finally {
+    // Always clean up temp directory from git clone
+    await cleanup();
+  }
 }
 
 // ============================================
@@ -618,6 +858,11 @@ async function runRemove(args: string[]): Promise<void> {
     await removeSkill(skillName, agent, { global: isGlobal });
   }
 
+  // Remove from lock file
+  await removeSkillFromLock(skillName).catch(() => {
+    // Non-critical: lock file cleanup failure shouldn't fail removal
+  });
+
   spinner.stop('Removed');
   p.outro(pc.green(`Removed ${skillName} from ${agentsWithSkill.length} agent(s)`));
 }
@@ -692,6 +937,617 @@ async function runInfo(args: string[]): Promise<void> {
 }
 
 // ============================================
+// Check Command
+// ============================================
+
+export interface SkillUpdateInfo {
+  name: string;
+  source: string;
+  sourceUrl: string;
+  skillPath?: string;
+  localHash: string;
+  remoteHash: string;
+}
+
+async function runCheck(_args: string[]): Promise<void> {
+  console.log();
+  p.intro(pc.bgCyan(pc.black(' askill check ')));
+
+  const spinner = p.spinner();
+  spinner.start('Reading lock file...');
+
+  const skills = await getAllLockedSkills();
+  const skillNames = Object.keys(skills);
+
+  if (skillNames.length === 0) {
+    spinner.stop('No skills tracked');
+    p.log.info('No installed skills found in lock file');
+    p.log.info(`Install skills with ${pc.cyan('askill add <skill>')}`);
+    p.outro('');
+    return;
+  }
+
+  spinner.stop(`Found ${skillNames.length} tracked skill(s)`);
+  spinner.start('Checking for updates...');
+
+  const updatable: SkillUpdateInfo[] = [];
+  const upToDate: string[] = [];
+  const uncheckable: Array<{ name: string; reason: string }> = [];
+
+  for (const [name, entry] of Object.entries(skills)) {
+    // Only GitHub sources can be checked via Tree SHA
+    if (entry.sourceType !== 'github' || !entry.source) {
+      uncheckable.push({ name, reason: entry.sourceType === 'local' ? 'local source' : 'no source info' });
+      continue;
+    }
+
+    // No hash stored — can't compare
+    if (!entry.skillFolderHash) {
+      uncheckable.push({ name, reason: 'no hash recorded (reinstall to fix)' });
+      continue;
+    }
+
+    try {
+      const remoteHash = await fetchSkillFolderHash(entry.source, entry.skillPath || '');
+
+      if (!remoteHash) {
+        uncheckable.push({ name, reason: 'could not fetch remote hash' });
+        continue;
+      }
+
+      if (remoteHash !== entry.skillFolderHash) {
+        updatable.push({
+          name,
+          source: entry.source,
+          sourceUrl: entry.sourceUrl,
+          skillPath: entry.skillPath,
+          localHash: entry.skillFolderHash,
+          remoteHash,
+        });
+      } else {
+        upToDate.push(name);
+      }
+    } catch {
+      uncheckable.push({ name, reason: 'failed to check remote' });
+    }
+  }
+
+  spinner.stop('Check complete');
+  console.log();
+
+  if (updatable.length > 0) {
+    p.log.warning(pc.yellow(`${updatable.length} skill(s) have updates available:`));
+    for (const u of updatable) {
+      console.log(`  ${pc.yellow('↑')} ${pc.cyan(u.name)} ${pc.dim(`from ${u.source}`)}`);
+      console.log(`    ${pc.dim(`${u.localHash.slice(0, 8)} → ${u.remoteHash.slice(0, 8)}`)}`);
+    }
+    console.log();
+    p.log.info(`Run ${pc.cyan('askill update')} to update all`);
+  }
+
+  if (upToDate.length > 0) {
+    p.log.success(pc.green(`${upToDate.length} skill(s) up to date`));
+  }
+
+  if (uncheckable.length > 0) {
+    for (const u of uncheckable) {
+      console.log(`  ${pc.dim('?')} ${u.name} ${pc.dim(`(${u.reason})`)}`);
+    }
+  }
+
+  console.log();
+  p.outro(updatable.length > 0 ? pc.yellow(`${updatable.length} update(s) available`) : pc.green('All up to date'));
+}
+
+// ============================================
+// Update Command
+// ============================================
+
+async function runUpdate(args: string[]): Promise<void> {
+  const isYes = args.includes('-y') || args.includes('--yes');
+  const specificSkill = args.find((a) => !a.startsWith('-'));
+
+  console.log();
+  p.intro(pc.bgCyan(pc.black(' askill update ')));
+
+  const spinner = p.spinner();
+  spinner.start('Checking for updates...');
+
+  const skills = await getAllLockedSkills();
+  const skillNames = Object.keys(skills);
+
+  if (skillNames.length === 0) {
+    spinner.stop('No skills tracked');
+    p.log.info('No installed skills found in lock file');
+    p.outro('');
+    return;
+  }
+
+  // Find which skills have updates
+  const updatable: SkillUpdateInfo[] = [];
+
+  for (const [name, entry] of Object.entries(skills)) {
+    // If specific skill requested, skip others
+    if (specificSkill && name !== specificSkill) continue;
+
+    if (entry.sourceType !== 'github' || !entry.source || !entry.skillFolderHash) {
+      continue;
+    }
+
+    try {
+      const remoteHash = await fetchSkillFolderHash(entry.source, entry.skillPath || '');
+      if (remoteHash && remoteHash !== entry.skillFolderHash) {
+        updatable.push({
+          name,
+          source: entry.source,
+          sourceUrl: entry.sourceUrl,
+          skillPath: entry.skillPath,
+          localHash: entry.skillFolderHash,
+          remoteHash,
+        });
+      }
+    } catch {
+      // Skip skills that can't be checked
+    }
+  }
+
+  if (updatable.length === 0) {
+    spinner.stop('All skills up to date');
+    p.outro(pc.green('Nothing to update'));
+    return;
+  }
+
+  spinner.stop(`${updatable.length} update(s) available`);
+
+  // Show what will be updated
+  for (const u of updatable) {
+    console.log(`  ${pc.yellow('↑')} ${pc.cyan(u.name)} ${pc.dim(`(${u.localHash.slice(0, 8)} → ${u.remoteHash.slice(0, 8)})`)}`);
+  }
+
+  // Confirm
+  if (!isYes) {
+    const confirmed = await p.confirm({
+      message: `Update ${updatable.length} skill(s)?`,
+    });
+
+    if (p.isCancel(confirmed) || !confirmed) {
+      p.cancel('Update cancelled');
+      return;
+    }
+  }
+
+  // Get last selected agents
+  const lastAgents = await getLastSelectedAgents();
+  let targetAgents: AgentType[];
+
+  if (lastAgents && lastAgents.length > 0) {
+    targetAgents = lastAgents as AgentType[];
+  } else {
+    // Detect installed agents
+    spinner.start('Detecting agents...');
+    const installedAgents = await detectInstalledAgents();
+    spinner.stop(`Found ${installedAgents.length} agent(s)`);
+    targetAgents = installedAgents;
+  }
+
+  if (targetAgents.length === 0) {
+    p.log.error('No agents found');
+    p.outro(pc.red('Cannot update without agents'));
+    return;
+  }
+
+  // Update each skill: clone → discover → install
+  spinner.start('Updating...');
+
+  let successCount = 0;
+  let failCount = 0;
+
+  for (const u of updatable) {
+    spinner.message(`Updating ${u.name}...`);
+
+    let tempDir: string | undefined;
+    try {
+      // Clone the source repo
+      tempDir = await cloneRepo(u.sourceUrl);
+
+      // Discover the specific skill
+      let discovered = await discoverSkills(tempDir, u.skillPath);
+      discovered = discovered.filter((s) => s.name === u.name);
+
+      if (discovered.length === 0) {
+        // Skill might have been renamed or moved; try all
+        discovered = await discoverSkills(tempDir);
+        discovered = discovered.filter((s) => s.name === u.name);
+      }
+
+      if (discovered.length === 0) {
+        p.log.warning(`Skill "${u.name}" not found in source, skipping`);
+        failCount++;
+        continue;
+      }
+
+      const skill = discovered[0];
+
+      // Install to all target agents
+      for (const agent of targetAgents) {
+        if (skill.path) {
+          await installSkillFromDir(skill.name, skill.path, agent, { mode: 'symlink' });
+        } else {
+          await installSkill(skill.name, skill.rawContent, agent, { mode: 'symlink' });
+        }
+      }
+
+      // Update lock entry with new hash
+      const lockEntry = skills[u.name];
+      await addSkillToLock(u.name, {
+        source: lockEntry.source,
+        sourceType: lockEntry.sourceType,
+        sourceUrl: lockEntry.sourceUrl,
+        skillPath: lockEntry.skillPath,
+        skillFolderHash: u.remoteHash,
+      });
+
+      successCount++;
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Unknown error';
+      p.log.error(`Failed to update ${u.name}: ${pc.dim(msg)}`);
+      failCount++;
+    } finally {
+      if (tempDir) {
+        await cleanupTempDir(tempDir).catch(() => {});
+      }
+    }
+  }
+
+  spinner.stop('Update complete');
+
+  if (successCount > 0) {
+    p.log.success(pc.green(`Updated ${successCount} skill(s)`));
+  }
+  if (failCount > 0) {
+    p.log.error(pc.red(`Failed to update ${failCount} skill(s)`));
+  }
+
+  console.log();
+  p.outro(pc.green('Done!'));
+}
+
+// ============================================
+// Run Command
+// ============================================
+
+/**
+ * Parse the skill:command format.
+ * Supports: skill-name:command, @scope/skill:command
+ */
+function parseRunTarget(input: string): { skill: string; command: string } | null {
+  // Find the last colon that separates skill from command
+  // Handle @scope/name:command (colon is after the skill name)
+  const colonIndex = input.lastIndexOf(':');
+  if (colonIndex <= 0 || colonIndex === input.length - 1) {
+    return null;
+  }
+
+  return {
+    skill: input.slice(0, colonIndex),
+    command: input.slice(colonIndex + 1),
+  };
+}
+
+/**
+ * Locate the installed skill directory.
+ * Search order: project canonical → project agent dirs → global canonical → global agent dirs
+ */
+async function findSkillDir(skillName: string): Promise<string | null> {
+  const { access: fsAccess } = await import('fs/promises');
+  const sanitized = sanitizeName(skillName);
+  const cwd = process.cwd();
+
+  // 1. Project canonical: .agents/skills/<skill>
+  const projectCanonical = join(cwd, AGENTS_DIR, SKILLS_SUBDIR, sanitized);
+  try {
+    await fsAccess(join(projectCanonical, 'SKILL.md'));
+    return projectCanonical;
+  } catch {}
+
+  // 2. Project agent dirs (check first few common agents)
+  const commonAgentDirs = ['.claude/skills', '.cursor/skills', '.opencode/skills', '.windsurf/skills'];
+  for (const dir of commonAgentDirs) {
+    const agentPath = join(cwd, dir, sanitized);
+    try {
+      await fsAccess(join(agentPath, 'SKILL.md'));
+      return agentPath;
+    } catch {}
+  }
+
+  // 3. Global canonical: ~/.agents/skills/<skill>
+  const home = homedir();
+  const globalCanonical = join(home, AGENTS_DIR, SKILLS_SUBDIR, sanitized);
+  try {
+    await fsAccess(join(globalCanonical, 'SKILL.md'));
+    return globalCanonical;
+  } catch {}
+
+  // 4. Global agent dirs
+  const globalAgentDirs = ['.claude/skills', '.cursor/skills', '.opencode/skills'];
+  for (const dir of globalAgentDirs) {
+    const agentPath = join(home, dir, sanitized);
+    try {
+      await fsAccess(join(agentPath, 'SKILL.md'));
+      return agentPath;
+    } catch {}
+  }
+
+  return null;
+}
+
+async function runRun(args: string[]): Promise<void> {
+  if (args.length === 0) {
+    console.log(`${RED}Error: Missing run target${RESET}`);
+    console.log(`Usage: askill run <skill>:<command> [args...]`);
+    console.log(`\nExamples:`);
+    console.log(`  askill run my-skill:build`);
+    console.log(`  askill run code-stats:analyze -- --path ./src`);
+    console.log(`  askill run my-skill:_setup`);
+    process.exit(1);
+  }
+
+  const target = args[0];
+  const parsed = parseRunTarget(target);
+
+  if (!parsed) {
+    console.log(`${RED}Error: Invalid run target "${target}"${RESET}`);
+    console.log(`Expected format: ${CYAN}<skill>:<command>${RESET}`);
+    console.log(`Example: askill run my-skill:build`);
+    process.exit(1);
+  }
+
+  const { skill, command } = parsed;
+
+  // Extra args: everything after the target, skip -- separator if present
+  let extraArgs = args.slice(1);
+  if (extraArgs[0] === '--') {
+    extraArgs = extraArgs.slice(1);
+  }
+
+  // Find the skill directory
+  const skillDir = await findSkillDir(skill);
+
+  if (!skillDir) {
+    console.log(`${RED}Error: Skill "${skill}" not found${RESET}`);
+    console.log(`Install it with: ${CYAN}askill add <source>${RESET}`);
+    process.exit(1);
+  }
+
+  // Read SKILL.md and parse commands
+  const fs = await import('fs/promises');
+  const skillMdPath = join(skillDir, 'SKILL.md');
+  const content = await fs.readFile(skillMdPath, 'utf-8');
+  const { frontmatter } = parseSkillMd(content);
+
+  if (!frontmatter.commands || Object.keys(frontmatter.commands).length === 0) {
+    console.log(`${RED}Error: Skill "${skill}" does not define any commands${RESET}`);
+    console.log(`${DIM}Check the skill's SKILL.md for available commands${RESET}`);
+    process.exit(1);
+  }
+
+  const cmdDef = frontmatter.commands[command];
+
+  if (!cmdDef) {
+    console.log(`${RED}Error: Command "${command}" not found in skill "${skill}"${RESET}`);
+    console.log(`\nAvailable commands:`);
+    for (const [name, def] of Object.entries(frontmatter.commands)) {
+      const prefix = name.startsWith('_') ? pc.dim('  (internal) ') : '  ';
+      console.log(`${prefix}${pc.cyan(name)} ${pc.dim('—')} ${def.description || 'No description'}`);
+    }
+    process.exit(1);
+  }
+
+  if (!cmdDef.run) {
+    console.log(`${RED}Error: Command "${command}" has no "run" field${RESET}`);
+    process.exit(1);
+  }
+
+  // Build the full command with extra args
+  let shellCmd = cmdDef.run;
+  if (extraArgs.length > 0) {
+    // Shell-escape args and append
+    const escapedArgs = extraArgs.map((a) => {
+      if (/[^a-zA-Z0-9_\-.\/=:]/.test(a)) {
+        return `'${a.replace(/'/g, "'\\''")}'`;
+      }
+      return a;
+    });
+    shellCmd += ' ' + escapedArgs.join(' ');
+  }
+
+  // Execute the command in the skill's directory
+  console.log(`${DIM}$ ${shellCmd}${RESET}`);
+  console.log();
+
+  const { spawn } = await import('child_process');
+
+  const child = spawn(shellCmd, {
+    cwd: skillDir,
+    shell: true,
+    stdio: 'inherit',
+    env: {
+      ...process.env,
+      ASKILL_SKILL_DIR: skillDir,
+      ASKILL_SKILL_NAME: skill,
+      ASKILL_COMMAND: command,
+    },
+  });
+
+  const exitCode = await new Promise<number>((resolve) => {
+    child.on('close', (code) => resolve(code ?? 0));
+    child.on('error', () => resolve(1));
+  });
+
+  process.exit(exitCode);
+}
+
+// ============================================
+// Init Command
+// ============================================
+
+async function runInit(args: string[]): Promise<void> {
+  const targetDir = args.find((a) => !a.startsWith('-')) || '.';
+  const isYes = args.includes('-y') || args.includes('--yes');
+
+  console.log();
+  p.intro(pc.bgCyan(pc.black(' askill init ')));
+
+  // Check if SKILL.md already exists
+  const skillPath = join(process.cwd(), targetDir, 'SKILL.md');
+  
+  try {
+    await import('fs').then((fs) => fs.promises.access(skillPath));
+    p.log.error(`SKILL.md already exists at ${pc.cyan(skillPath)}`);
+    p.outro(pc.red('Aborted'));
+    return;
+  } catch {
+    // File doesn't exist, continue
+  }
+
+  let name: string;
+  let description: string;
+  let version: string;
+  let author: string;
+  let tags: string[];
+
+  if (isYes) {
+    // Non-interactive: use defaults
+    const dirName = targetDir === '.' ? process.cwd().split('/').pop() || 'my-skill' : targetDir;
+    name = dirName;
+    description = 'A new askill skill';
+    version = '0.1.0';
+    author = '';
+    tags = [];
+  } else {
+    // Interactive prompts
+    const dirName = targetDir === '.' ? process.cwd().split('/').pop() || 'my-skill' : targetDir;
+
+    const nameResult = await p.text({
+      message: 'Skill name',
+      placeholder: dirName,
+      defaultValue: dirName,
+      validate: (value) => {
+        if (!value) return 'Name is required';
+        if (!/^[a-z0-9-]+$/.test(value)) return 'Name must be lowercase alphanumeric with hyphens';
+        return undefined;
+      },
+    });
+
+    if (p.isCancel(nameResult)) {
+      p.cancel('Init cancelled');
+      return;
+    }
+    name = nameResult as string;
+
+    const descResult = await p.text({
+      message: 'Description',
+      placeholder: 'What does this skill do?',
+      validate: (value) => {
+        if (!value) return 'Description is required';
+        if (value.length > 200) return 'Description must be 200 characters or less';
+        return undefined;
+      },
+    });
+
+    if (p.isCancel(descResult)) {
+      p.cancel('Init cancelled');
+      return;
+    }
+    description = descResult as string;
+
+    const versionResult = await p.text({
+      message: 'Version',
+      placeholder: '0.1.0',
+      defaultValue: '0.1.0',
+      validate: (value) => {
+        if (!value) return 'Version is required';
+        if (!/^\d+\.\d+\.\d+(-[\w.]+)?$/.test(value)) return 'Must be valid semver (e.g., 0.1.0)';
+        return undefined;
+      },
+    });
+
+    if (p.isCancel(versionResult)) {
+      p.cancel('Init cancelled');
+      return;
+    }
+    version = versionResult as string;
+
+    const authorResult = await p.text({
+      message: 'Author (GitHub username)',
+      placeholder: 'your-username',
+    });
+
+    if (p.isCancel(authorResult)) {
+      p.cancel('Init cancelled');
+      return;
+    }
+    author = (authorResult as string) || '';
+
+    const tagsResult = await p.text({
+      message: 'Tags (comma-separated)',
+      placeholder: 'automation, productivity',
+    });
+
+    if (p.isCancel(tagsResult)) {
+      p.cancel('Init cancelled');
+      return;
+    }
+    tags = (tagsResult as string)
+      .split(',')
+      .map((t) => t.trim())
+      .filter((t) => t.length > 0);
+  }
+
+  // Generate SKILL.md content
+  let content = '---\n';
+  content += `name: ${name}\n`;
+  content += `description: ${description}\n`;
+  content += `version: ${version}\n`;
+  if (author) {
+    content += `author: ${author}\n`;
+  }
+  if (tags.length > 0) {
+    content += `tags:\n`;
+    for (const tag of tags) {
+      content += `  - ${tag}\n`;
+    }
+  }
+  content += '---\n\n';
+  content += `# ${name.split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}\n\n`;
+  content += `${description}\n\n`;
+  content += `## Usage\n\n`;
+  content += `Explain how an AI agent should use this skill...\n\n`;
+  content += `## Examples\n\n`;
+  content += `Provide concrete examples of when and how to use this skill.\n`;
+
+  // Create directory if needed
+  const targetPath = join(process.cwd(), targetDir);
+  if (targetDir !== '.') {
+    const fs = await import('fs');
+    await fs.promises.mkdir(targetPath, { recursive: true });
+  }
+
+  // Write SKILL.md
+  const fs = await import('fs');
+  await fs.promises.writeFile(skillPath, content, 'utf-8');
+
+  p.log.success(`Created ${pc.cyan(skillPath)}`);
+  console.log();
+  console.log(pc.dim('Next steps:'));
+  console.log(`  1. Edit ${pc.cyan('SKILL.md')} to add instructions`);
+  console.log(`  2. Optionally add ${pc.cyan('scripts/')} for commands`);
+  console.log(`  3. Test locally: ${pc.cyan(`askill add ./${targetDir === '.' ? '' : targetDir}`)}`);
+  console.log();
+  p.outro(pc.green('Done!'));
+}
+
+// ============================================
 // Main
 // ============================================
 
@@ -738,9 +1594,25 @@ async function main(): Promise<void> {
       await runInfo(restArgs);
       break;
 
+    case 'check':
+      await runCheck(restArgs);
+      break;
+
     case 'update':
     case 'upgrade':
+      await runUpdate(restArgs);
+      break;
+
+    case 'self-update':
       await selfUpdate();
+      break;
+
+    case 'run':
+      await runRun(restArgs);
+      break;
+
+    case 'init':
+      await runInit(restArgs);
       break;
 
     case '--help':

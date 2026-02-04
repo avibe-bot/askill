@@ -86,7 +86,7 @@ tags:
   - tag1
   - tag2
 
-skills:
+dependencies:
   - @dependency/one@^1.0.0
   - @dependency/two@^2.0.0
 
@@ -148,7 +148,7 @@ Common issues and solutions...
 | `version` | Semver version | `1.2.0` |
 | `author` | GitHub username | `anthropic` |
 | `tags` | Discovery tags | `[git, automation]` |
-| `skills` | Dependencies | `[@askill/git@^1.0.0]` |
+| `dependencies` | Skill dependencies | `[@askill/git@^1.0.0]` |
 | `commands` | Runnable commands | See below |
 | `repository` | Source repo | `{url: "..."}` |
 | `license` | SPDX identifier | `MIT` |
@@ -222,7 +222,7 @@ askill run my-skill:_setup
 
 Make the script executable:
 ```bash
-chmod +x ~/.askill/skills/@scope/my-skill/scripts/main.py
+chmod +x .claude/skills/my-skill/scripts/main.py
 ```
 ```
 
@@ -288,7 +288,7 @@ commands:
 ### Depending on Other Skills
 
 ```yaml
-skills:
+dependencies:
   - @askill/git@^1.0.0      # Git operations
   - @askill/fs@^1.0.0        # File system utilities
 ```

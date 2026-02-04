@@ -35,7 +35,7 @@ The **SKILL.md** format - a single file that contains everything an agent needs:
 name: code-reviewer
 description: Review code for bugs and style issues
 version: 1.0.0
-skills:
+dependencies:
   - @askill/git@^1.0.0
 commands:
   review:
@@ -98,7 +98,7 @@ Advanced features are available when needed:
 ---
 name: advanced-skill
 version: 2.1.0
-skills:
+dependencies:
   - @dep/one@^1.0.0
   - @dep/two@^2.0.0
 commands:
@@ -139,35 +139,27 @@ Every skill has a unique identifier (slug):
 
 ### Skills Directory Structure
 
+Skills are installed to each agent's specific directory and symlinked from a canonical location:
+
 ```
-~/.askill/
-├── skills/
-│   ├── @anthropic/
-│   │   └── memory/
-│   │       └── SKILL.md
-│   └── gh/
-│       └── facebook/
-│           └── react/
-│               └── scripts/
-│                   └── errors/
-│                       └── SKILL.md
-└── config.json
+project/
+├── .agents/skills/              # Canonical location (source of truth)
+│   └── memory/
+│       └── SKILL.md
+├── .claude/skills/              # Claude Code (symlink)
+│   └── memory -> ../../.agents/skills/memory
+├── .opencode/skills/            # OpenCode (symlink)
+│   └── memory -> ../../.agents/skills/memory
+└── .cursor/skills/              # Cursor (symlink)
+    └── memory -> ../../.agents/skills/memory
+
+~/.config/askill/
+└── config.json                  # User preferences
 ```
 
 ### Agent Integration
 
-When you install a skill, askill updates the agent's configuration:
-
-```markdown
-<!-- .claude/CLAUDE.md (auto-generated section) -->
-
-## Installed Skills
-
-- `@anthropic/memory` - Persistent memory for conversations
-- `@askill/git` - Git operations and workflow
-
-Use `askill run <skill>:<command>` to execute skill commands.
-```
+When you install a skill, askill writes to the canonical location and creates symlinks in each agent's skills directory. The agent then discovers and uses the skill according to its own conventions.
 
 ## Next Steps
 
