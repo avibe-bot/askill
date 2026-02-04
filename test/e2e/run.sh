@@ -1119,6 +1119,202 @@ SKILL
 }
 
 # ════════════════════════════════════════════════════
+# Test: Validate - file not found
+# ════════════════════════════════════════════════════
+test_validate_not_found() {
+  header "Validate - file not found"
+  clean_workspace
+
+  local output
+  output=$(cd "$WORKSPACE" && $CLI validate nonexistent.md 2>&1) || true
+
+  assert_contains "$output" "not found" "reports file not found"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Validate - valid SKILL.md
+# ════════════════════════════════════════════════════
+test_validate_valid() {
+  header "Validate - valid SKILL.md"
+  clean_workspace
+
+  mkdir -p "$WORKSPACE/test-skill"
+  cat > "$WORKSPACE/test-skill/SKILL.md" <<'SKILL'
+---
+name: test-skill
+description: A test skill for validation
+version: 1.0.0
+author: tester
+tags:
+  - test
+  - validation
+---
+
+# Test Skill
+
+This is a test.
+SKILL
+
+  local output
+  output=$(cd "$WORKSPACE" && $CLI validate test-skill/SKILL.md 2>&1) || true
+
+  assert_contains "$output" "Ready to publish" "reports valid"
+  assert_contains "$output" "name" "checks name field"
+  assert_contains "$output" "description" "checks description field"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Validate - missing required field
+# ════════════════════════════════════════════════════
+test_validate_missing_field() {
+  header "Validate - missing required field"
+  clean_workspace
+
+  mkdir -p "$WORKSPACE/bad-skill"
+  cat > "$WORKSPACE/bad-skill/SKILL.md" <<'SKILL'
+---
+name: incomplete
+---
+
+# Incomplete Skill
+SKILL
+
+  local output
+  output=$(cd "$WORKSPACE" && $CLI validate bad-skill/SKILL.md 2>&1) || true
+
+  assert_contains "$output" "Missing required field" "reports missing field"
+  assert_contains "$output" "description" "identifies missing description"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Validate - invalid version
+# ════════════════════════════════════════════════════
+test_validate_invalid_version() {
+  header "Validate - invalid version format"
+  clean_workspace
+
+  mkdir -p "$WORKSPACE/ver-skill"
+  cat > "$WORKSPACE/ver-skill/SKILL.md" <<'SKILL'
+---
+name: verskill
+description: A skill with bad version
+version: not-a-version
+---
+
+# Version Skill
+SKILL
+
+  local output
+  output=$(cd "$WORKSPACE" && $CLI validate ver-skill/SKILL.md 2>&1) || true
+
+  assert_contains "$output" "version" "checks version"
+  assert_contains "$output" "semver" "mentions semver format"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Validate - with commands
+# ════════════════════════════════════════════════════
+test_validate_with_commands() {
+  header "Validate - with commands"
+  clean_workspace
+
+  mkdir -p "$WORKSPACE/cmd-skill"
+  cat > "$WORKSPACE/cmd-skill/SKILL.md" <<'SKILL'
+---
+name: cmdskill
+description: A skill with commands
+version: 1.0.0
+commands:
+  build:
+    run: npm run build
+    description: Build the project
+  test:
+    run: npm test
+    description: Run tests
+---
+
+# Command Skill
+SKILL
+
+  local output
+  output=$(cd "$WORKSPACE" && $CLI validate cmd-skill/SKILL.md 2>&1) || true
+
+  assert_contains "$output" "Ready to publish" "valid with commands"
+  assert_contains "$output" "Commands: 2" "counts commands"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Validate - command missing run field
+# ════════════════════════════════════════════════════
+test_validate_command_missing_run() {
+  header "Validate - command missing run"
+  clean_workspace
+
+  mkdir -p "$WORKSPACE/badcmd-skill"
+  cat > "$WORKSPACE/badcmd-skill/SKILL.md" <<'SKILL'
+---
+name: badcmd
+description: A skill with invalid command
+version: 1.0.0
+commands:
+  broken:
+    description: This command has no run field
+---
+
+# Bad Command Skill
+SKILL
+
+  local output
+  output=$(cd "$WORKSPACE" && $CLI validate badcmd-skill/SKILL.md 2>&1) || true
+
+  assert_contains "$output" "missing" "reports missing field"
+  assert_contains "$output" "run" "identifies missing run field"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Validate - default path (current dir)
+# ════════════════════════════════════════════════════
+test_validate_default_path() {
+  header "Validate - default path (./SKILL.md)"
+  clean_workspace
+
+  cat > "$WORKSPACE/SKILL.md" <<'SKILL'
+---
+name: default-skill
+description: Testing default path validation
+version: 0.1.0
+---
+
+# Default Skill
+SKILL
+
+  local output
+  output=$(cd "$WORKSPACE" && $CLI validate 2>&1) || true
+
+  assert_contains "$output" "Ready to publish" "validates default path"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Validate - no frontmatter
+# ════════════════════════════════════════════════════
+test_validate_no_frontmatter() {
+  header "Validate - no frontmatter"
+  clean_workspace
+
+  mkdir -p "$WORKSPACE/nofm-skill"
+  cat > "$WORKSPACE/nofm-skill/SKILL.md" <<'SKILL'
+# No Frontmatter Skill
+
+This skill has no YAML frontmatter.
+SKILL
+
+  local output
+  output=$(cd "$WORKSPACE" && $CLI validate nofm-skill/SKILL.md 2>&1) || true
+
+  assert_contains "$output" "frontmatter" "reports missing frontmatter"
+}
+
+# ════════════════════════════════════════════════════
 # Runner
 # ════════════════════════════════════════════════════
 
@@ -1162,6 +1358,14 @@ ALL_TESTS=(
   test_run_command_not_found
   test_run_with_args
   test_run_script
+  test_validate_not_found
+  test_validate_valid
+  test_validate_missing_field
+  test_validate_invalid_version
+  test_validate_with_commands
+  test_validate_command_missing_run
+  test_validate_default_path
+  test_validate_no_frontmatter
   test_search
   test_info
 )

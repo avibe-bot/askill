@@ -67,6 +67,7 @@ ${BOLD}Commands:${RESET}
   find, search, s [query]  Search for skills
   info <skill>             Show skill details
   init [dir]               Create a new SKILL.md template
+  validate [path]          Validate a SKILL.md file
   check                    Check installed skills for updates
   update [skill]           Update installed skills
   run <skill:cmd>          Run a skill command
@@ -1388,6 +1389,238 @@ async function runRun(args: string[]): Promise<void> {
 }
 
 // ============================================
+// Validate Command
+// ============================================
+
+interface ValidationResult {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+}
+
+function validateFrontmatter(frontmatter: Record<string, unknown>): ValidationResult {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  // Required fields
+  if (!frontmatter.name) {
+    errors.push('Missing required field: name');
+  } else if (typeof frontmatter.name !== 'string') {
+    errors.push('Field "name" must be a string');
+  } else if (!/^[a-z0-9-]+$/.test(frontmatter.name)) {
+    errors.push('Field "name" must be lowercase alphanumeric with hyphens only');
+  }
+
+  if (!frontmatter.description) {
+    errors.push('Missing required field: description');
+  } else if (typeof frontmatter.description !== 'string') {
+    errors.push('Field "description" must be a string');
+  } else if (frontmatter.description.length > 200) {
+    warnings.push('Field "description" should be 200 characters or less');
+  }
+
+  // Version format (optional but if present must be valid semver)
+  if (frontmatter.version !== undefined) {
+    if (typeof frontmatter.version !== 'string') {
+      errors.push('Field "version" must be a string');
+    } else if (!/^\d+\.\d+\.\d+(-[\w.]+)?(\+[\w.]+)?$/.test(frontmatter.version)) {
+      errors.push('Field "version" must be valid semver (e.g., 1.0.0, 1.0.0-beta.1)');
+    }
+  } else {
+    warnings.push('Missing optional field: version (recommended)');
+  }
+
+  // Author (optional)
+  if (frontmatter.author !== undefined) {
+    if (typeof frontmatter.author !== 'string' && typeof frontmatter.author !== 'object') {
+      errors.push('Field "author" must be a string or object');
+    }
+  }
+
+  // Tags (optional)
+  if (frontmatter.tags !== undefined) {
+    if (!Array.isArray(frontmatter.tags)) {
+      errors.push('Field "tags" must be an array');
+    } else {
+      for (const tag of frontmatter.tags) {
+        if (typeof tag !== 'string') {
+          errors.push('Each tag must be a string');
+          break;
+        }
+      }
+    }
+  }
+
+  // Dependencies (optional)
+  if (frontmatter.dependencies !== undefined) {
+    if (!Array.isArray(frontmatter.dependencies)) {
+      errors.push('Field "dependencies" must be an array');
+    } else {
+      for (const dep of frontmatter.dependencies) {
+        if (typeof dep !== 'string') {
+          errors.push('Each dependency must be a string');
+          break;
+        }
+        // Check dependency format: @scope/name@version or gh:owner/repo@skill
+        if (!dep.startsWith('@') && !dep.startsWith('gh:')) {
+          warnings.push(`Dependency "${dep}" should start with @ or gh:`);
+        }
+      }
+    }
+  }
+
+  // Commands (optional)
+  if (frontmatter.commands !== undefined) {
+    if (typeof frontmatter.commands !== 'object' || frontmatter.commands === null) {
+      errors.push('Field "commands" must be an object');
+    } else {
+      const commands = frontmatter.commands as Record<string, unknown>;
+      for (const [cmdName, cmdDef] of Object.entries(commands)) {
+        if (typeof cmdDef !== 'object' || cmdDef === null) {
+          errors.push(`Command "${cmdName}" must be an object`);
+          continue;
+        }
+        const def = cmdDef as Record<string, unknown>;
+        if (!def.run) {
+          errors.push(`Command "${cmdName}" is missing required field: run`);
+        } else if (typeof def.run !== 'string') {
+          errors.push(`Command "${cmdName}.run" must be a string`);
+        }
+        if (!def.description) {
+          warnings.push(`Command "${cmdName}" is missing description`);
+        } else if (typeof def.description !== 'string') {
+          errors.push(`Command "${cmdName}.description" must be a string`);
+        }
+      }
+    }
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    warnings,
+  };
+}
+
+async function runValidate(args: string[]): Promise<void> {
+  // Default to ./SKILL.md if no path provided
+  let targetPath = args.find((a) => !a.startsWith('-')) || 'SKILL.md';
+  
+  // If path doesn't end with SKILL.md, append it
+  if (!targetPath.endsWith('SKILL.md')) {
+    targetPath = join(targetPath, 'SKILL.md');
+  }
+
+  // Resolve to absolute path
+  const absolutePath = join(process.cwd(), targetPath);
+
+  console.log();
+  p.intro(pc.bgCyan(pc.black(' askill validate ')));
+
+  const spinner = p.spinner();
+  spinner.start(`Checking ${targetPath}...`);
+
+  // Check if file exists
+  const fs = await import('fs/promises');
+  try {
+    await fs.access(absolutePath);
+  } catch {
+    spinner.stop(pc.red('File not found'));
+    p.log.error(`Cannot find ${pc.cyan(targetPath)}`);
+    p.outro(pc.red('Validation failed'));
+    process.exit(1);
+  }
+
+  // Read and parse the file
+  let content: string;
+  try {
+    content = await fs.readFile(absolutePath, 'utf-8');
+  } catch (error) {
+    spinner.stop(pc.red('Read error'));
+    p.log.error(`Cannot read file: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    p.outro(pc.red('Validation failed'));
+    process.exit(1);
+  }
+
+  // Check for frontmatter
+  const frontmatterMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!frontmatterMatch) {
+    spinner.stop(pc.red('Invalid format'));
+    p.log.error('SKILL.md must start with YAML frontmatter (--- ... ---)');
+    p.outro(pc.red('Validation failed'));
+    process.exit(1);
+  }
+
+  spinner.stop('Parsing...');
+
+  // Parse frontmatter
+  const { frontmatter } = parseSkillMd(content);
+
+  // Validate
+  const result = validateFrontmatter(frontmatter as Record<string, unknown>);
+
+  console.log();
+
+  // Report errors
+  if (result.errors.length > 0) {
+    for (const error of result.errors) {
+      console.log(`  ${pc.red('✗')} ${error}`);
+    }
+  }
+
+  // Report warnings
+  if (result.warnings.length > 0) {
+    for (const warning of result.warnings) {
+      console.log(`  ${pc.yellow('!')} ${warning}`);
+    }
+  }
+
+  // Report successes (what passed)
+  const checks = [
+    { name: 'Frontmatter is valid YAML', passed: true }, // Already parsed
+    { name: 'Required field: name', passed: !!frontmatter.name && typeof frontmatter.name === 'string' },
+    { name: 'Required field: description', passed: !!frontmatter.description && typeof frontmatter.description === 'string' },
+  ];
+
+  if (frontmatter.version) {
+    const versionValid = typeof frontmatter.version === 'string' && 
+      /^\d+\.\d+\.\d+(-[\w.]+)?(\+[\w.]+)?$/.test(frontmatter.version);
+    checks.push({ name: `Version format: ${frontmatter.version}`, passed: versionValid });
+  }
+
+  if (frontmatter.dependencies && Array.isArray(frontmatter.dependencies)) {
+    checks.push({ name: `Dependencies: ${frontmatter.dependencies.length} defined`, passed: true });
+  }
+
+  if (frontmatter.commands && typeof frontmatter.commands === 'object') {
+    const cmdCount = Object.keys(frontmatter.commands).length;
+    checks.push({ name: `Commands: ${cmdCount} defined`, passed: cmdCount > 0 });
+  }
+
+  // Show passing checks only if no errors
+  if (result.errors.length === 0) {
+    for (const check of checks) {
+      if (check.passed) {
+        console.log(`  ${pc.green('✓')} ${check.name}`);
+      }
+    }
+  }
+
+  console.log();
+
+  if (result.valid) {
+    if (result.warnings.length > 0) {
+      p.outro(pc.yellow(`Valid with ${result.warnings.length} warning(s)`));
+    } else {
+      p.outro(pc.green('Ready to publish!'));
+    }
+  } else {
+    p.outro(pc.red(`Validation failed: ${result.errors.length} error(s)`));
+    process.exit(1);
+  }
+}
+
+// ============================================
 // Init Command
 // ============================================
 
@@ -1609,6 +1842,10 @@ async function main(): Promise<void> {
 
     case 'run':
       await runRun(restArgs);
+      break;
+
+    case 'validate':
+      await runValidate(restArgs);
       break;
 
     case 'init':
