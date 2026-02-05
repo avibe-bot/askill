@@ -1832,7 +1832,6 @@ async function main(): Promise<void> {
       break;
 
     case 'update':
-    case 'upgrade':
       await runUpdate(restArgs);
       break;
 

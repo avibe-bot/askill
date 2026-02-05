@@ -1315,6 +1315,69 @@ SKILL
 }
 
 # ════════════════════════════════════════════════════
+# Test: Upgrade command - checks for updates
+# ════════════════════════════════════════════════════
+test_upgrade_checks_version() {
+  header "Upgrade - checks for updates"
+
+  local output
+  output=$($CLI upgrade 2>&1) || true
+
+  # Should check for updates and report status
+  if output_matches "$output" "Checking for updates"; then
+    pass "upgrade checks for updates"
+  else
+    fail "upgrade did not check for updates"
+    echo "$output" | strip_ansi | head -5 | sed 's/^/    /'
+  fi
+
+  # Should report version status (either up to date or new version available)
+  if output_matches "$output" "latest version\|Updating from\|Failed to check"; then
+    pass "upgrade reports version status"
+  else
+    fail "upgrade did not report version status"
+  fi
+}
+
+# ════════════════════════════════════════════════════
+# Test: Upgrade command - already up to date
+# ════════════════════════════════════════════════════
+test_upgrade_already_latest() {
+  header "Upgrade - already up to date"
+
+  local output
+  output=$($CLI upgrade 2>&1) || true
+
+  # Current version should be latest (since we just built it)
+  if output_matches "$output" "already on the latest version\|0.1.0"; then
+    pass "reports already on latest version"
+  elif output_matches "$output" "Failed to check"; then
+    skip "could not check version (network issue)"
+  else
+    # There might actually be a newer version, which is also OK
+    if output_matches "$output" "Updating from"; then
+      pass "found newer version to update to"
+    else
+      fail "unexpected upgrade output"
+      echo "$output" | strip_ansi | head -5 | sed 's/^/    /'
+    fi
+  fi
+}
+
+# ════════════════════════════════════════════════════
+# Test: Help shows upgrade command
+# ════════════════════════════════════════════════════
+test_help_shows_upgrade() {
+  header "Help shows upgrade command"
+
+  local output
+  output=$($CLI --help 2>&1) || true
+
+  assert_contains "$output" "upgrade" "help shows upgrade command"
+  assert_contains "$output" "Update askill CLI" "shows upgrade description"
+}
+
+# ════════════════════════════════════════════════════
 # Runner
 # ════════════════════════════════════════════════════
 
@@ -1366,6 +1429,9 @@ ALL_TESTS=(
   test_validate_command_missing_run
   test_validate_default_path
   test_validate_no_frontmatter
+  test_upgrade_checks_version
+  test_upgrade_already_latest
+  test_help_shows_upgrade
   test_search
   test_info
 )
