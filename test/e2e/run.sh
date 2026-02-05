@@ -656,7 +656,7 @@ test_help_includes_check() {
 
   assert_contains "$output" "check" "help shows check command"
   assert_contains "$output" "update" "help shows update command"
-  assert_contains "$output" "self-update" "help shows self-update command"
+  assert_contains "$output" "upgrade" "help shows upgrade command"
 }
 
 # ════════════════════════════════════════════════════

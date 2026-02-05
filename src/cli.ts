@@ -71,7 +71,7 @@ ${BOLD}Commands:${RESET}
   check                    Check installed skills for updates
   update [skill]           Update installed skills
   run <skill:cmd>          Run a skill command
-  self-update              Update askill CLI
+  upgrade                  Update askill CLI to latest version
 
 ${BOLD}Skill Source Formats:${RESET}
   owner/repo                          All skills from a GitHub repo
@@ -1836,7 +1836,7 @@ async function main(): Promise<void> {
       await runUpdate(restArgs);
       break;
 
-    case 'self-update':
+    case 'upgrade':
       await selfUpdate();
       break;
 

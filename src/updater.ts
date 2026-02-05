@@ -142,7 +142,7 @@ export async function checkForUpdates(force: boolean = false): Promise<void> {
     console.log();
     console.log(`${YELLOW}╭───────────────────────────────────────────╮${RESET}`);
     console.log(`${YELLOW}│${RESET}  Update available: ${DIM}${current}${RESET} → ${GREEN}${latest}${RESET}        ${YELLOW}│${RESET}`);
-    console.log(`${YELLOW}│${RESET}  Run ${CYAN}askill self-update${RESET} to update         ${YELLOW}│${RESET}`);
+    console.log(`${YELLOW}│${RESET}  Run ${CYAN}askill upgrade${RESET} to update             ${YELLOW}│${RESET}`);
     console.log(`${YELLOW}╰───────────────────────────────────────────╯${RESET}`);
     console.log();
   }

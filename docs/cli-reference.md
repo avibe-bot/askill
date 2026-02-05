@@ -24,12 +24,14 @@ npx askill-cli <command>
 | `askill list` | Implemented | List installed skills |
 | `askill find` | Implemented | Search for skills |
 | `askill info` | Implemented | Show skill details |
-| `askill update` | Implemented | Update askill CLI |
-| `askill run` | Planned | Run a skill command |
+| `askill update` | Implemented | Update installed skills |
+| `askill check` | Implemented | Check installed skills for available updates |
+| `askill upgrade` | Implemented | Update askill CLI to latest version |
+| `askill run` | Implemented | Run a skill command |
 | `askill login` | Planned | Authenticate with GitHub |
 | `askill logout` | Planned | Remove stored credentials |
 | `askill publish` | Planned | Publish a skill |
-| `askill validate` | Planned | Validate a SKILL.md |
+| `askill validate` | Implemented | Validate a SKILL.md |
 | `askill token` | Planned | Manage authentication tokens |
 
 ---
@@ -239,17 +241,90 @@ extract-errors
 
 ## askill update
 
-Update the askill CLI itself.
+Update installed skills to their latest versions.
 
 ### Usage
 
 ```bash
+askill update [skill] [options]
+```
+
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `skill` | Optional skill name to update (updates all if omitted) |
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `-g, --global` | Update global skills |
+
+### Examples
+
+```bash
+# Update all installed skills
 askill update
+
+# Update a specific skill
+askill update extract-errors
+
+# Update global skills
+askill update -g
 ```
 
 ---
 
-## askill run (Planned)
+## askill check
+
+Check installed skills for available updates.
+
+### Usage
+
+```bash
+askill check [options]
+```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `-g, --global` | Check global skills |
+
+### Examples
+
+```bash
+# Check all installed skills
+askill check
+
+# Check global skills
+askill check -g
+```
+
+---
+
+## askill upgrade
+
+Update the askill CLI itself to the latest version.
+
+### Usage
+
+```bash
+askill upgrade
+```
+
+### How It Works
+
+1. Checks for the latest version from askill.sh
+2. Downloads the appropriate binary for your platform
+3. Replaces the current binary in place
+
+If installed via npm, it will prompt you to use `npm install -g askill-cli@latest` instead.
+
+---
+
+## askill run
 
 Execute a command defined by a skill.
 
@@ -355,7 +430,7 @@ askill publish --dry-run
 
 ---
 
-## askill validate (Planned)
+## askill validate
 
 Validate a SKILL.md file.
 
