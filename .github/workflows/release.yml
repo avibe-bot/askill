@@ -7,6 +7,10 @@ on:
 
 permissions:
   contents: write
+  id-token: write  # Required for npm OIDC trusted publishing
+
+env:
+  GITHUB_REPO: ${{ github.repository }}
 
 jobs:
   build:
@@ -15,16 +19,19 @@ jobs:
         include:
           - os: ubuntu-latest
             target: linux-x64
-            asset_name: spm-linux-x64
+            asset_name: askill-linux-x64
+          - os: ubuntu-latest
+            target: linux-arm64
+            asset_name: askill-linux-arm64
           - os: macos-latest
             target: darwin-x64
-            asset_name: spm-darwin-x64
+            asset_name: askill-darwin-x64
           - os: macos-latest
             target: darwin-arm64
-            asset_name: spm-darwin-arm64
+            asset_name: askill-darwin-arm64
           - os: windows-latest
             target: win32-x64
-            asset_name: spm-win32-x64.exe
+            asset_name: askill-win32-x64.exe
 
     runs-on: ${{ matrix.os }}
 
@@ -65,22 +72,26 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            ./dist/spm-linux-x64
-            ./dist/spm-darwin-x64
-            ./dist/spm-darwin-arm64
-            ./dist/spm-win32-x64.exe
+            ./dist/askill-linux-x64
+            ./dist/askill-linux-arm64
+            ./dist/askill-darwin-x64
+            ./dist/askill-darwin-arm64
+            ./dist/askill-win32-x64.exe
           generate_release_notes: true
 
   publish-npm:
-    needs: build
+    needs: release
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # Required for npm OIDC trusted publishing
     
     steps:
       - uses: actions/checkout@v4
       
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           registry-url: 'https://registry.npmjs.org'
       
       - name: Install dependencies
@@ -89,7 +100,7 @@ jobs:
       - name: Build
         run: npm run build
       
+      # npm Trusted Publishing - no token needed!
+      # Provenance is automatically generated with OIDC
       - name: Publish to npm
-        run: npm publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public

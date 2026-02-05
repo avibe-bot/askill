@@ -1,5 +1,5 @@
 {
-  "name": "@askill/cli",
+  "name": "askill-cli",
   "version": "0.1.0",
   "description": "askill - The Agent Skill Package Manager",
   "type": "module",
@@ -20,6 +20,7 @@
     "test:e2e": "docker build -f Dockerfile.test -t askill-test . && docker run --rm askill-test",
     "test:e2e:build": "docker build -f Dockerfile.test -t askill-test .",
     "test:e2e:run": "docker run --rm askill-test",
+    "release": "./scripts/release.sh",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
@@ -36,10 +37,10 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/anthropics/askill.git"
+    "url": "https://github.com/avibe-bot/askill.git"
   },
   "homepage": "https://askill.sh",
-  "author": "",
+  "author": "askill",
   "license": "MIT",
   "devDependencies": {
     "@types/bun": "latest",

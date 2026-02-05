@@ -10,11 +10,13 @@ import { VERSION, CYAN, GREEN, YELLOW, RED, RESET, DIM } from './constants.ts';
 
 const UPDATE_CHECK_FILE = join(homedir(), '.askill', 'last-update-check');
 const UPDATE_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const GITHUB_REPO = 'avibe-bot/askill';
 
 interface VersionInfo {
   latest: string;
   minimum: string;
   releaseNotes: string;
+  releaseUrl?: string;
   downloadUrls: Record<string, string>;
 }
 
@@ -64,16 +66,57 @@ async function saveUpdateCheckTime(): Promise<void> {
 }
 
 /**
- * Fetch version info from API
+ * Fetch version info from API, fallback to GitHub
  */
 async function fetchVersionInfo(): Promise<VersionInfo | null> {
+  // Try askill.sh API first
   try {
     const response = await fetch('https://askill.sh/api/v1/cli/version', {
       headers: { 'User-Agent': `askill/${VERSION}` },
     });
 
+    if (response.ok) {
+      return response.json();
+    }
+  } catch {
+    // API failed, try GitHub directly
+  }
+
+  // Fallback: fetch from GitHub releases
+  try {
+    const response = await fetch(
+      `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`,
+      {
+        headers: {
+          'User-Agent': `askill/${VERSION}`,
+          'Accept': 'application/vnd.github.v3+json',
+        },
+      }
+    );
+
     if (!response.ok) return null;
-    return response.json();
+
+    const release = await response.json();
+    const latest = release.tag_name.replace(/^v/, '');
+
+    // Build download URLs from assets
+    const downloadUrls: Record<string, string> = {};
+    for (const asset of release.assets || []) {
+      const platforms = ['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64', 'win32-x64'];
+      for (const p of platforms) {
+        if (asset.name.includes(p)) {
+          downloadUrls[p] = asset.browser_download_url;
+        }
+      }
+    }
+
+    return {
+      latest,
+      minimum: '0.1.0',
+      releaseNotes: release.body?.slice(0, 500) || `Release ${latest}`,
+      releaseUrl: release.html_url,
+      downloadUrls,
+    };
   } catch {
     return null;
   }
@@ -99,7 +142,7 @@ export async function checkForUpdates(force: boolean = false): Promise<void> {
     console.log();
     console.log(`${YELLOW}╭───────────────────────────────────────────╮${RESET}`);
     console.log(`${YELLOW}│${RESET}  Update available: ${DIM}${current}${RESET} → ${GREEN}${latest}${RESET}        ${YELLOW}│${RESET}`);
-    console.log(`${YELLOW}│${RESET}  Run ${CYAN}askill update${RESET} to update               ${YELLOW}│${RESET}`);
+    console.log(`${YELLOW}│${RESET}  Run ${CYAN}askill self-update${RESET} to update         ${YELLOW}│${RESET}`);
     console.log(`${YELLOW}╰───────────────────────────────────────────╯${RESET}`);
     console.log();
   }
@@ -139,7 +182,10 @@ export async function selfUpdate(): Promise<boolean> {
 
   if (!downloadUrl) {
     console.log(`${RED}No download available for your platform (${platformKey})${RESET}`);
-    console.log(`Please update manually: npm install -g askill@latest`);
+    console.log(`Please update manually:`);
+    console.log(`  ${CYAN}npm install -g @askill/cli@latest${RESET}`);
+    console.log(`  ${DIM}or${RESET}`);
+    console.log(`  ${CYAN}curl -fsSL https://askill.sh/install.sh | sh${RESET}`);
     return false;
   }
 
@@ -151,7 +197,7 @@ export async function selfUpdate(): Promise<boolean> {
     if (isNodeProcess) {
       // Running via node/bun - suggest npm update
       console.log(`${YELLOW}Running via Node.js runtime${RESET}`);
-      console.log(`Please update using: ${CYAN}npm install -g askill@latest${RESET}`);
+      console.log(`Please update using: ${CYAN}npm install -g @askill/cli@latest${RESET}`);
       return false;
     }
 
@@ -161,7 +207,11 @@ export async function selfUpdate(): Promise<boolean> {
 
     console.log(`Downloading ${platformKey} binary...`);
 
-    const response = await fetch(downloadUrl);
+    const response = await fetch(downloadUrl, {
+      headers: { 'User-Agent': `askill/${VERSION}` },
+      redirect: 'follow',
+    });
+    
     if (!response.ok || !response.body) {
       throw new Error(`Download failed: ${response.status}`);
     }
@@ -189,11 +239,16 @@ export async function selfUpdate(): Promise<boolean> {
     }
 
     console.log(`${GREEN}Successfully updated to v${latest}!${RESET}`);
-    console.log(`${DIM}Release notes: ${versionInfo.releaseNotes}${RESET}`);
+    if (versionInfo.releaseNotes) {
+      console.log(`${DIM}Release notes: ${versionInfo.releaseNotes.slice(0, 200)}${RESET}`);
+    }
     return true;
   } catch (error) {
     console.log(`${RED}Update failed: ${error instanceof Error ? error.message : 'Unknown error'}${RESET}`);
-    console.log(`Please update manually: npm install -g askill@latest`);
+    console.log(`Please update manually:`);
+    console.log(`  ${CYAN}npm install -g @askill/cli@latest${RESET}`);
+    console.log(`  ${DIM}or${RESET}`);
+    console.log(`  ${CYAN}curl -fsSL https://askill.sh/install.sh | sh${RESET}`);
     return false;
   }
 }
