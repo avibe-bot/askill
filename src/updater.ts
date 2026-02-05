@@ -183,9 +183,9 @@ export async function selfUpdate(): Promise<boolean> {
   if (!downloadUrl) {
     console.log(`${RED}No download available for your platform (${platformKey})${RESET}`);
     console.log(`Please update manually:`);
-    console.log(`  ${CYAN}npm install -g @askill/cli@latest${RESET}`);
-    console.log(`  ${DIM}or${RESET}`);
     console.log(`  ${CYAN}curl -fsSL https://askill.sh/install.sh | sh${RESET}`);
+    console.log(`  ${DIM}or${RESET}`);
+    console.log(`  ${CYAN}npm install -g askill-cli@latest${RESET}`);
     return false;
   }
 
@@ -197,7 +197,7 @@ export async function selfUpdate(): Promise<boolean> {
     if (isNodeProcess) {
       // Running via node/bun - suggest npm update
       console.log(`${YELLOW}Running via Node.js runtime${RESET}`);
-      console.log(`Please update using: ${CYAN}npm install -g @askill/cli@latest${RESET}`);
+      console.log(`Please update using: ${CYAN}npm install -g askill-cli@latest${RESET}`);
       return false;
     }
 
@@ -246,9 +246,9 @@ export async function selfUpdate(): Promise<boolean> {
   } catch (error) {
     console.log(`${RED}Update failed: ${error instanceof Error ? error.message : 'Unknown error'}${RESET}`);
     console.log(`Please update manually:`);
-    console.log(`  ${CYAN}npm install -g @askill/cli@latest${RESET}`);
-    console.log(`  ${DIM}or${RESET}`);
     console.log(`  ${CYAN}curl -fsSL https://askill.sh/install.sh | sh${RESET}`);
+    console.log(`  ${DIM}or${RESET}`);
+    console.log(`  ${CYAN}npm install -g askill-cli@latest${RESET}`);
     return false;
   }
 }

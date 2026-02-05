@@ -4,16 +4,22 @@ Get up and running with askill in 5 minutes.
 
 ## Installation
 
-### Using npm (recommended)
+### One-line install (recommended)
 
 ```bash
-npm install -g @askill/cli
+curl -fsSL https://askill.sh/install.sh | sh
+```
+
+### Using npm
+
+```bash
+npm install -g askill-cli
 ```
 
 ### Using npx (no install)
 
 ```bash
-npx @askill/cli add @anthropic/memory
+npx askill-cli add gh:anthropic/courses@prompt-eng
 ```
 
 ### Verify Installation

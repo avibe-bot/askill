@@ -251,7 +251,9 @@ jobs:
           node-version: '20'
           
       - name: Install askill
-        run: npm install -g @askill/cli
+        run: |
+          curl -fsSL https://askill.sh/install.sh | sh
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
         
       - name: Publish
         run: askill publish

@@ -5,11 +5,14 @@ Complete reference for the askill command-line interface.
 ## Installation
 
 ```bash
-# Install globally
-npm install -g @askill/cli
+# One-line install (recommended)
+curl -fsSL https://askill.sh/install.sh | sh
+
+# Or install via npm
+npm install -g askill-cli
 
 # Or use without installing
-npx @askill/cli <command>
+npx askill-cli <command>
 ```
 
 ## Commands Overview

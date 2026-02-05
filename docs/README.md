@@ -88,4 +88,4 @@ askill run @skill/name:command --arg value
 
 - **Repository**: [github.com/avibe-bot/askill](https://github.com/avibe-bot/askill)
 - **Website**: [askill.sh](https://askill.sh)
-- **npm**: [@askill/cli](https://www.npmjs.com/package/@askill/cli)
+- **npm**: [askill-cli](https://www.npmjs.com/package/askill-cli)

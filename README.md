@@ -2,7 +2,7 @@
 
 > The package manager for AI agent skills.
 
-[![npm version](https://img.shields.io/npm/v/@askill/cli.svg)](https://www.npmjs.com/package/@askill/cli)
+[![npm version](https://img.shields.io/npm/v/askill-cli.svg)](https://www.npmjs.com/package/askill-cli)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 askill is a universal package manager for AI agent skills. It enables agents to discover, install, and use skills across Claude Code, Cursor, Windsurf, and 40+ other AI coding assistants.
@@ -10,8 +10,8 @@ askill is a universal package manager for AI agent skills. It enables agents to 
 ## Quick Start
 
 ```bash
-# Install
-npm install -g @askill/cli
+# Install (recommended)
+curl -fsSL https://askill.sh/install.sh | sh
 
 # Install a skill from GitHub
 askill add gh:owner/repo@skill-name
@@ -36,16 +36,22 @@ askill list
 
 ## Installation
 
-### npm (recommended)
+### One-line install (recommended)
 
 ```bash
-npm install -g @askill/cli
+curl -fsSL https://askill.sh/install.sh | sh
+```
+
+### npm
+
+```bash
+npm install -g askill-cli
 ```
 
 ### npx (no install)
 
 ```bash
-npx @askill/cli add @anthropic/memory
+npx askill-cli add gh:anthropic/courses@prompt-eng
 ```
 
 ### Verify
@@ -251,4 +257,4 @@ MIT License - see [LICENSE](./LICENSE) for details.
 
 ---
 
-**Website**: [askill.sh](https://askill.sh) | **npm**: [@askill/cli](https://www.npmjs.com/package/@askill/cli)
+**Website**: [askill.sh](https://askill.sh) | **npm**: [askill-cli](https://www.npmjs.com/package/askill-cli)
