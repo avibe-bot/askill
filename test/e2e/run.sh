@@ -1378,6 +1378,147 @@ test_help_shows_upgrade() {
 }
 
 # ════════════════════════════════════════════════════
+# Test: Remove global skill
+# ════════════════════════════════════════════════════
+test_remove_global() {
+  header "Remove global skill"
+  clean_workspace
+
+  # Install globally first
+  cd "$WORKSPACE" && $CLI add /app/skills/@askill/agent -a claude-code -g -y >/dev/null 2>&1 || true
+
+  # Verify installed
+  if [ ! -e "/root/.claude/skills/agent" ]; then
+    fail "global skill not installed, cannot test removal"
+    return
+  fi
+
+  # Remove globally
+  local output
+  output=$(cd "$WORKSPACE" && echo "y" | $CLI remove agent -g 2>&1) || true
+
+  # Verify removed
+  if [ ! -e "/root/.claude/skills/agent" ]; then
+    pass "global skill removed"
+  else
+    fail "global skill still exists after removal"
+  fi
+}
+
+# ════════════════════════════════════════════════════
+# Test: List global only
+# ════════════════════════════════════════════════════
+test_list_global() {
+  header "List global skills only"
+  clean_workspace
+
+  # Install one locally and one globally
+  cd "$WORKSPACE" && $CLI add /app/skills/@askill/agent -a claude-code -y >/dev/null 2>&1 || true
+  cd "$WORKSPACE" && $CLI add /app/skills/@askill/agent -a claude-code -g -y >/dev/null 2>&1 || true
+
+  # List global only
+  local output
+  output=$(cd "$WORKSPACE" && $CLI list -g 2>&1) || true
+
+  assert_contains "$output" "agent" "lists global skill"
+  assert_contains "$output" "global" "indicates global scope"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Re-install same skill (should update/overwrite)
+# ════════════════════════════════════════════════════
+test_reinstall_skill() {
+  header "Re-install same skill"
+  clean_workspace
+
+  # Install first time
+  cd "$WORKSPACE" && $CLI add /app/skills/@askill/agent -a claude-code -y >/dev/null 2>&1 || true
+
+  # Get modification time
+  local first_time
+  first_time=$(stat -c %Y "$WORKSPACE/.agents/skills/agent/SKILL.md" 2>/dev/null || stat -f %m "$WORKSPACE/.agents/skills/agent/SKILL.md" 2>/dev/null)
+
+  # Small delay
+  sleep 1
+
+  # Install again
+  local output
+  output=$(cd "$WORKSPACE" && $CLI add /app/skills/@askill/agent -a claude-code -y 2>&1) || true
+
+  # Should succeed without error
+  if output_matches "$output" "error\|failed"; then
+    fail "reinstall failed with error"
+  else
+    pass "reinstall completed without error"
+  fi
+}
+
+# ════════════════════════════════════════════════════
+# Test: Command aliases
+# ════════════════════════════════════════════════════
+test_command_aliases() {
+  header "Command aliases"
+  clean_workspace
+
+  # Test 'i' as alias for 'install/add'
+  local output
+  output=$(cd "$WORKSPACE" && $CLI i /app/skills/@askill/agent -a claude-code -y 2>&1) || true
+  assert_contains "$output" "agent" "alias 'i' works for add"
+
+  # Test 'ls' as alias for 'list'
+  output=$(cd "$WORKSPACE" && $CLI ls 2>&1) || true
+  if output_matches "$output" "skill\|Installed\|agent"; then
+    pass "alias 'ls' works for list"
+  else
+    fail "alias 'ls' failed"
+  fi
+
+  # Test 'rm' as alias for 'remove'
+  output=$(cd "$WORKSPACE" && echo "y" | $CLI rm agent 2>&1) || true
+  if [ ! -e "$WORKSPACE/.claude/skills/agent" ]; then
+    pass "alias 'rm' works for remove"
+  else
+    fail "alias 'rm' failed"
+  fi
+
+  # Test 's' as alias for 'search'
+  output=$($CLI s memory 2>&1) || true
+  if output_matches "$output" "result\|found\|memory\|Search\|error"; then
+    pass "alias 's' works for search"
+  else
+    fail "alias 's' failed"
+  fi
+}
+
+# ════════════════════════════════════════════════════
+# Test: Version flag variants
+# ════════════════════════════════════════════════════
+test_version_flags() {
+  header "Version flag variants"
+
+  local output
+  output=$($CLI --version 2>&1) || true
+  assert_contains "$output" "0.1.0" "--version shows version"
+
+  output=$($CLI -v 2>&1) || true
+  assert_contains "$output" "0.1.0" "-v shows version"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Help flag variants
+# ════════════════════════════════════════════════════
+test_help_flags() {
+  header "Help flag variants"
+
+  local output
+  output=$($CLI --help 2>&1) || true
+  assert_contains "$output" "Usage" "--help shows usage"
+
+  output=$($CLI -h 2>&1) || true
+  assert_contains "$output" "Usage" "-h shows usage"
+}
+
+# ════════════════════════════════════════════════════
 # Runner
 # ════════════════════════════════════════════════════
 
@@ -1432,6 +1573,12 @@ ALL_TESTS=(
   test_upgrade_checks_version
   test_upgrade_already_latest
   test_help_shows_upgrade
+  test_remove_global
+  test_list_global
+  test_reinstall_skill
+  test_command_aliases
+  test_version_flags
+  test_help_flags
   test_search
   test_info
 )

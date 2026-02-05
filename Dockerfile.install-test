@@ -1,0 +1,39 @@
+# askill CLI - Installation Methods Test Environment
+# Tests npm, npx, bun, and binary installation
+#
+# Usage:
+#   docker build -f Dockerfile.install-test -t askill-install-test .
+#   docker run --rm askill-install-test
+#   docker run --rm askill-install-test npm
+#   docker run --rm askill-install-test npx
+#   docker run --rm askill-install-test bun
+#   docker run --rm askill-install-test binary
+#   docker run --rm askill-install-test github
+
+FROM node:20-slim
+
+# Install required tools
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install bun
+RUN curl -fsSL https://bun.sh/install | bash
+ENV PATH="/root/.bun/bin:$PATH"
+
+# Simulate agent installations
+RUN mkdir -p /root/.claude /root/.cursor /root/.opencode /root/.local/bin
+ENV PATH="/root/.local/bin:$PATH"
+
+WORKDIR /app
+
+# Copy test script
+COPY test/e2e/install-methods.sh /app/test/e2e/
+
+# Make executable
+RUN chmod +x /app/test/e2e/install-methods.sh
+
+ENTRYPOINT ["/app/test/e2e/install-methods.sh"]
+CMD []
