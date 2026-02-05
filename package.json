@@ -4,7 +4,7 @@
   "description": "askill - The Agent Skill Package Manager",
   "type": "module",
   "bin": {
-    "askill": "./dist/cli.mjs"
+    "askill": "dist/cli.mjs"
   },
   "files": [
     "dist",
@@ -37,7 +37,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/avibe-bot/askill.git"
+    "url": "git+https://github.com/avibe-bot/askill.git"
   },
   "homepage": "https://askill.sh",
   "author": "askill",
