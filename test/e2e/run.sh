@@ -128,7 +128,7 @@ test_version() {
   local output
   output=$($CLI --version 2>&1) || true
 
-  assert_contains "$output" "0.1.0" "shows version number"
+  assert_contains "$output" "0.1.1" "shows version number"
 }
 
 # ════════════════════════════════════════════════════
@@ -1349,7 +1349,7 @@ test_upgrade_already_latest() {
   output=$($CLI upgrade 2>&1) || true
 
   # Current version should be latest (since we just built it)
-  if output_matches "$output" "already on the latest version\|0.1.0"; then
+  if output_matches "$output" "already on the latest version\|0.1.1"; then
     pass "reports already on latest version"
   elif output_matches "$output" "Failed to check"; then
     skip "could not check version (network issue)"
@@ -1498,10 +1498,10 @@ test_version_flags() {
 
   local output
   output=$($CLI --version 2>&1) || true
-  assert_contains "$output" "0.1.0" "--version shows version"
+  assert_contains "$output" "0.1.1" "--version shows version"
 
   output=$($CLI -v 2>&1) || true
-  assert_contains "$output" "0.1.0" "-v shows version"
+  assert_contains "$output" "0.1.1" "-v shows version"
 }
 
 # ════════════════════════════════════════════════════
