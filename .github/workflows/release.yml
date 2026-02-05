@@ -91,8 +91,12 @@ jobs:
       
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
+      
+      # Ensure npm is new enough for trusted publishing (requires 11.5.1+)
+      - name: Check npm version
+        run: npm --version
       
       - name: Install dependencies
         run: npm install
