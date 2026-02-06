@@ -3,7 +3,7 @@
 // askill - Agent Skill Package Manager
 // Install AI agent skills from askill.sh
 
-import { VERSION, RESET, BOLD, DIM, CYAN, GREEN, YELLOW, RED, GRAY, agents, AGENTS_DIR, SKILLS_SUBDIR, type AgentType } from './constants.ts';
+import { VERSION, REGISTRY_URL, RESET, BOLD, DIM, CYAN, GREEN, YELLOW, RED, GRAY, agents, AGENTS_DIR, SKILLS_SUBDIR, type AgentType } from './constants.ts';
 import { api, APIError, type Skill, type RepoSkill } from './api.ts';
 import { installSkill, installSkillFromDir, detectInstalledAgents, listInstalledSkills, removeSkill, isSkillInstalled, sanitizeName, type InstallMode } from './installer.ts';
 import { checkForUpdates, selfUpdate } from './updater.ts';
@@ -757,6 +757,10 @@ async function runSearch(args: string[]): Promise<void> {
         ? `gh:${skill.owner}/${skill.repo}@${displayName}`
         : `gh:${displayName}`;
       console.log(`  ${pc.dim('askill add')} ${installCmd}`);
+      // Show web link for sharing
+      if (skill.id) {
+        console.log(`  ${pc.dim(REGISTRY_URL + '/skills/' + skill.id)}`);
+      }
       console.log();
     }
 

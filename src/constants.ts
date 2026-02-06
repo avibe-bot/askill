@@ -1,6 +1,6 @@
 // askill CLI Constants and Configuration
 
-export const VERSION = '0.1.1';
+export const VERSION = '0.1.2';
 export const API_BASE_URL = 'https://askill.sh/api/v1';
 export const REGISTRY_URL = 'https://askill.sh';
 

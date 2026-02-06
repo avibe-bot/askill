@@ -128,7 +128,7 @@ test_version() {
   local output
   output=$($CLI --version 2>&1) || true
 
-  assert_contains "$output" "0.1.1" "shows version number"
+  assert_contains "$output" "0.1.2" "shows version number"
 }
 
 # ════════════════════════════════════════════════════
@@ -165,6 +165,12 @@ test_search() {
   # If API is reachable, we get results; if not, we get an error
   if output_matches "$output" "result\|found\|memory"; then
     pass "search returns results or reports count"
+    # Verify web links are shown in results
+    if output_matches "$output" "askill\.sh/skills/[0-9]"; then
+      pass "search results include web links"
+    else
+      fail "search results missing web links (askill.sh/skills/<id>)"
+    fi
   elif output_matches "$output" "failed\|error\|ENOTFOUND"; then
     skip "API not reachable (offline mode)"
   else
@@ -1349,7 +1355,7 @@ test_upgrade_already_latest() {
   output=$($CLI upgrade 2>&1) || true
 
   # Current version should be latest (since we just built it)
-  if output_matches "$output" "already on the latest version\|0.1.1"; then
+  if output_matches "$output" "already on the latest version\|0.1.2"; then
     pass "reports already on latest version"
   elif output_matches "$output" "Failed to check"; then
     skip "could not check version (network issue)"
@@ -1498,10 +1504,10 @@ test_version_flags() {
 
   local output
   output=$($CLI --version 2>&1) || true
-  assert_contains "$output" "0.1.1" "--version shows version"
+  assert_contains "$output" "0.1.2" "--version shows version"
 
   output=$($CLI -v 2>&1) || true
-  assert_contains "$output" "0.1.1" "-v shows version"
+  assert_contains "$output" "0.1.2" "-v shows version"
 }
 
 # ════════════════════════════════════════════════════
