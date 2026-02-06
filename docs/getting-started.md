@@ -7,7 +7,7 @@ Get up and running with askill in 5 minutes.
 ### One-line install (recommended)
 
 ```bash
-curl -fsSL https://askill.sh/install.sh | sh
+curl -fsSL https://askill.sh | sh
 ```
 
 ### Using npm

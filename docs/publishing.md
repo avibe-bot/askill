@@ -252,7 +252,7 @@ jobs:
           
       - name: Install askill
         run: |
-          curl -fsSL https://askill.sh/install.sh | sh
+          curl -fsSL https://askill.sh | sh
           echo "$HOME/.local/bin" >> $GITHUB_PATH
         
       - name: Publish

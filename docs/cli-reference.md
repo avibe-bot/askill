@@ -6,7 +6,7 @@ Complete reference for the askill command-line interface.
 
 ```bash
 # One-line install (recommended)
-curl -fsSL https://askill.sh/install.sh | sh
+curl -fsSL https://askill.sh | sh
 
 # Or install via npm
 npm install -g askill-cli

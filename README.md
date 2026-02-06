@@ -54,7 +54,7 @@ askill is a universal package manager for AI agent skills. It enables agents to 
 
 ```bash
 # Install
-curl -fsSL https://askill.sh/install.sh | sh
+curl -fsSL https://askill.sh | sh
 
 # Install a skill
 askill add owner/repo@skill-name
@@ -71,7 +71,7 @@ askill list
 ### One-line install (recommended)
 
 ```bash
-curl -fsSL https://askill.sh/install.sh | sh
+curl -fsSL https://askill.sh | sh
 ```
 
 ### npm

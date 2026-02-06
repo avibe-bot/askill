@@ -1,7 +1,7 @@
 #!/bin/sh
 # askill CLI installer
-# Usage: curl -fsSL https://askill.sh/install.sh | sh
-#    or: curl -fsSL https://askill.sh/install.sh | sh -s -- -b /custom/path
+# Usage: curl -fsSL https://askill.sh | sh
+#    or: curl -fsSL https://askill.sh | sh -s -- -b /custom/path
 
 set -e
 
@@ -48,7 +48,7 @@ while [ $# -gt 0 ]; do
     -h|--help)
       echo "askill CLI installer"
       echo ""
-      echo "Usage: curl -fsSL https://askill.sh/install.sh | sh"
+      echo "Usage: curl -fsSL https://askill.sh | sh"
       echo ""
       echo "Options:"
       echo "  -b, --bin-dir <dir>   Installation directory (default: ~/.local/bin)"
