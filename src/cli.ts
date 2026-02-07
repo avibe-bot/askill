@@ -6,7 +6,7 @@
 import { VERSION, REGISTRY_URL, RESET, BOLD, DIM, CYAN, GREEN, YELLOW, RED, GRAY, agents, AGENTS_DIR, SKILLS_SUBDIR, type AgentType } from './constants.ts';
 import { api, APIError, type Skill, type RepoSkill } from './api.ts';
 import { installSkill, installSkillFromDir, detectInstalledAgents, listInstalledSkills, removeSkill, isSkillInstalled, sanitizeName, type InstallMode } from './installer.ts';
-import { checkForUpdates, selfUpdate } from './updater.ts';
+import { getAvailableUpdate, selfUpdate } from './updater.ts';
 import { getPreferredAgents, savePreferredAgents } from './config.ts';
 import { loadCredentials, saveCredentials, clearCredentials, maskToken } from './credentials.ts';
 import { extractDependencies, parseDependency, dependencyToSlug, parseSkillMd } from './parser.ts';
@@ -109,6 +109,10 @@ ${BOLD}Options:${RESET}
   --help, -h            Show this help message
   --version, -v         Show version number
 
+${BOLD}Per-command Help:${RESET}
+  askill <command> --help
+  askill help <command>
+
 ${BOLD}Examples:${RESET}
   ${DIM}$${RESET} askill add anthropic/courses@prompt-eng
   ${DIM}$${RESET} askill add anthropic/courses
@@ -120,6 +124,95 @@ ${BOLD}Examples:${RESET}
 
 ${DIM}Browse more at${RESET} ${CYAN}https://askill.sh${RESET}
 `);
+}
+
+function normalizeCommand(command: string): string {
+  switch (command) {
+    case 'install':
+    case 'i':
+      return 'add';
+    case 'search':
+    case 's':
+      return 'find';
+    case 'ls':
+      return 'list';
+    case 'rm':
+    case 'uninstall':
+      return 'remove';
+    case 'show':
+      return 'info';
+    default:
+      return command;
+  }
+}
+
+function showCommandHelp(commandInput: string): boolean {
+  const command = normalizeCommand(commandInput);
+
+  const helps: Record<string, string> = {
+    add: `${BOLD}askill add${RESET}\n\nUsage:\n  askill add <source> [options]\n\nDescription:\n  Install skills from published slugs, GitHub, or local directories.\n\nSources:\n  @author/skill-name\n  gh:owner/repo@skill-name\n  gh:owner/repo/path/to/skill\n  owner/repo\n  ./local/path\n\nOptions:\n  -g, --global            Install globally\n  -a, --agent <agents...> Install to specific agents\n  -y, --yes               Skip confirmation prompts\n  --copy                  Copy files instead of symlink\n  -l, --list              Preview discovered skills only\n  --all                   Install all discovered skills\n\nExamples:\n  askill add @johndoe/awesome-tool -y\n  askill add gh:facebook/react@extract-errors\n  askill add owner/repo --all -a claude-code opencode -y`,
+
+    remove: `${BOLD}askill remove${RESET}\n\nUsage:\n  askill remove <skill> [options]\n\nDescription:\n  Remove an installed skill from detected agents.\n\nOptions:\n  -g, --global            Remove global installation\n\nExamples:\n  askill remove memory\n  askill remove memory -g`,
+
+    list: `${BOLD}askill list${RESET}\n\nUsage:\n  askill list [options]\n\nDescription:\n  List installed skills and where they are available.\n\nOptions:\n  -g, --global            Show global skills only\n\nExamples:\n  askill list\n  askill list -g`,
+
+    find: `${BOLD}askill find${RESET}\n\nUsage:\n  askill find [query] [options]\n\nDescription:\n  Search indexed and published skills on askill.sh.\n\nOptions:\n  --full-desc             Show full descriptions\n\nExamples:\n  askill find memory\n  askill find code review --full-desc`,
+
+    info: `${BOLD}askill info${RESET}\n\nUsage:\n  askill info <slug>\n\nDescription:\n  Show detailed metadata and installation info for one skill.\n\nExamples:\n  askill info @johndoe/awesome-tool\n  askill info gh:facebook/react@extract-errors`,
+
+    check: `${BOLD}askill check${RESET}\n\nUsage:\n  askill check [skill]\n\nDescription:\n  Check installed skills for available updates without installing.\n\nExamples:\n  askill check\n  askill check memory`,
+
+    update: `${BOLD}askill update${RESET}\n\nUsage:\n  askill update [skill]\n\nDescription:\n  Update one installed skill or all installed skills.\n\nExamples:\n  askill update\n  askill update memory`,
+
+    run: `${BOLD}askill run${RESET}\n\nUsage:\n  askill run <skill>:<command> [args...]\n\nDescription:\n  Run a command declared in a skill's SKILL.md frontmatter.\n\nExamples:\n  askill run @anthropic/memory:save --key name --value \"Alice\"\n  askill run my-skill:_setup`,
+
+    validate: `${BOLD}askill validate${RESET}\n\nUsage:\n  askill validate [path]\n\nDescription:\n  Validate SKILL.md frontmatter and command structure.\n\nExamples:\n  askill validate\n  askill validate ./my-skill/SKILL.md`,
+
+    init: `${BOLD}askill init${RESET}\n\nUsage:\n  askill init [dir] [options]\n\nDescription:\n  Generate a new SKILL.md template interactively or non-interactively.\n\nOptions:\n  -y, --yes               Use defaults without prompts\n\nExamples:\n  askill init\n  askill init ./my-skill -y`,
+
+    submit: `${BOLD}askill submit${RESET}\n\nUsage:\n  askill submit <github-url>\n\nDescription:\n  Submit a GitHub repository or SKILL.md URL for indexing on askill.sh.\n\nExamples:\n  askill submit https://github.com/owner/repo\n  askill submit https://github.com/owner/repo/blob/main/skills/foo/SKILL.md`,
+
+    login: `${BOLD}askill login${RESET}\n\nUsage:\n  askill login [--token <ask_xxx>]\n\nDescription:\n  Save and verify an askill API token for publishing.\n\nExamples:\n  askill login\n  askill login --token ask_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`,
+
+    logout: `${BOLD}askill logout${RESET}\n\nUsage:\n  askill logout\n\nDescription:\n  Clear saved local credentials.`,
+
+    whoami: `${BOLD}askill whoami${RESET}\n\nUsage:\n  askill whoami\n\nDescription:\n  Show current authenticated account and masked token.`,
+
+    publish: `${BOLD}askill publish${RESET}\n\nUsage:\n  askill publish [path]\n  askill publish --github <blob-url-to-SKILL.md>\n\nDescription:\n  Publish a skill under your author scope (@author/skill-name).\n\nRequirements:\n  - Logged in via askill login\n  - SKILL.md contains valid name and semver version\n\nExamples:\n  askill publish\n  askill publish ./skills/my-skill\n  askill publish --github https://github.com/owner/repo/blob/main/skills/my-skill/SKILL.md`,
+
+    upgrade: `${BOLD}askill upgrade${RESET}\n\nUsage:\n  askill upgrade\n\nDescription:\n  Self-update askill CLI to the latest available version.`,
+
+    help: `${BOLD}askill help${RESET}\n\nUsage:\n  askill help\n  askill help <command>\n\nDescription:\n  Show global help or detailed help for a specific command.`,
+  };
+
+  const text = helps[command];
+  if (!text) return false;
+
+  console.log();
+  console.log(text);
+  console.log();
+  return true;
+}
+
+async function maybePromptForUpgrade(commandInput: string): Promise<void> {
+  const command = normalizeCommand(commandInput);
+  const skipCommands = new Set(['upgrade', 'help', 'version', '--version', '-v', '--help', '-h']);
+
+  if (skipCommands.has(command)) return;
+  if (!process.stdin.isTTY || !process.stdout.isTTY) return;
+
+  const available = await getAvailableUpdate(true).catch(() => null);
+  if (!available) return;
+
+  console.log();
+  const shouldUpgrade = await p.confirm({
+    message: `New askill version available (${available.current} -> ${available.latest}). Upgrade now?`,
+    initialValue: true,
+  });
+
+  if (p.isCancel(shouldUpgrade) || !shouldUpgrade) return;
+  console.log();
+  await selfUpdate();
 }
 
 // ============================================
@@ -2150,8 +2243,16 @@ async function runPublish(args: string[]): Promise<void> {
     p.log.error('SKILL.md must include frontmatter name');
     process.exit(1);
   }
-  if (!version || !/^\d+\.\d+\.\d+(?:-[\w.]+)?(?:\+[\w.]+)?$/.test(version)) {
-    p.log.error('SKILL.md must include a valid semver version');
+  if (!version) {
+    p.log.error('SKILL.md is missing frontmatter field "version".');
+    p.log.info('Add a semver version, for example: version: 0.1.0');
+    p.log.info('Valid examples: 1.0.0, 1.2.3-beta.1, 2.0.0+build.5');
+    process.exit(1);
+  }
+  if (!/^\d+\.\d+\.\d+(?:-[\w.]+)?(?:\+[\w.]+)?$/.test(version)) {
+    p.log.error(`Invalid semver version in SKILL.md: "${version}"`);
+    p.log.info('Expected format: MAJOR.MINOR.PATCH with optional prerelease/build');
+    p.log.info('Examples: 1.0.0, 1.1.0-beta.1, 2.0.0+build.7');
     process.exit(1);
   }
 
@@ -2194,9 +2295,6 @@ function toRawGitHubUrl(url: string): string | null {
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
 
-  // Check for updates in background (non-blocking)
-  checkForUpdates().catch(() => {});
-
   if (args.length === 0) {
     showBanner();
     return;
@@ -2204,6 +2302,11 @@ async function main(): Promise<void> {
 
   const command = args[0];
   const restArgs = args.slice(1);
+
+  // Per-command help: askill <command> --help
+  if ((restArgs.includes('--help') || restArgs.includes('-h')) && showCommandHelp(command)) {
+    return;
+  }
 
   switch (command) {
     case 'install':
@@ -2281,6 +2384,9 @@ async function main(): Promise<void> {
     case '--help':
     case '-h':
     case 'help':
+      if (restArgs[0] && showCommandHelp(restArgs[0])) {
+        break;
+      }
       showHelp();
       break;
 
@@ -2295,6 +2401,8 @@ async function main(): Promise<void> {
       console.log(`Run ${CYAN}askill --help${RESET} for usage.`);
       process.exit(1);
   }
+
+  await maybePromptForUpgrade(command);
 }
 
 main().catch((error) => {

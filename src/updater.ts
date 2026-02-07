@@ -20,6 +20,14 @@ interface VersionInfo {
   downloadUrls: Record<string, string>;
 }
 
+export interface AvailableUpdate {
+  current: string;
+  latest: string;
+  minimum: string;
+  releaseNotes: string;
+  releaseUrl?: string;
+}
+
 /**
  * Get platform key for download URL
  */
@@ -126,26 +134,34 @@ async function fetchVersionInfo(): Promise<VersionInfo | null> {
  * Check for updates and notify user
  */
 export async function checkForUpdates(force: boolean = false): Promise<void> {
+  const available = await getAvailableUpdate(force);
+  if (!available) return;
+
+  if (semver.lt(available.current, available.latest)) {
+    console.log();
+    console.log(`${YELLOW}╭───────────────────────────────────────────╮${RESET}`);
+    console.log(`${YELLOW}│${RESET}  Update available: ${DIM}${available.current}${RESET} → ${GREEN}${available.latest}${RESET}        ${YELLOW}│${RESET}`);
+    console.log(`${YELLOW}│${RESET}  Run ${CYAN}askill upgrade${RESET} to update             ${YELLOW}│${RESET}`);
+    console.log(`${YELLOW}╰───────────────────────────────────────────╯${RESET}`);
+    console.log();
+  }
+}
+
+/**
+ * Get update information if a newer version is available.
+ * Returns null when no check is needed, no update exists, or remote info is unavailable.
+ */
+export async function getAvailableUpdate(force: boolean = false): Promise<AvailableUpdate | null> {
   if (!force && !(await shouldCheckUpdate())) {
-    return;
+    return null;
   }
 
   await saveUpdateCheckTime();
 
   const versionInfo = await fetchVersionInfo();
-  if (!versionInfo) return;
+  if (!versionInfo) return null;
 
   const current = VERSION;
-  const latest = versionInfo.latest;
-
-  if (semver.lt(current, latest)) {
-    console.log();
-    console.log(`${YELLOW}╭───────────────────────────────────────────╮${RESET}`);
-    console.log(`${YELLOW}│${RESET}  Update available: ${DIM}${current}${RESET} → ${GREEN}${latest}${RESET}        ${YELLOW}│${RESET}`);
-    console.log(`${YELLOW}│${RESET}  Run ${CYAN}askill upgrade${RESET} to update             ${YELLOW}│${RESET}`);
-    console.log(`${YELLOW}╰───────────────────────────────────────────╯${RESET}`);
-    console.log();
-  }
 
   // Check minimum version requirement
   if (semver.lt(current, versionInfo.minimum)) {
@@ -153,6 +169,18 @@ export async function checkForUpdates(force: boolean = false): Promise<void> {
     console.log(`Minimum required: ${versionInfo.minimum}`);
     process.exit(1);
   }
+
+  if (!semver.lt(current, versionInfo.latest)) {
+    return null;
+  }
+
+  return {
+    current,
+    latest: versionInfo.latest,
+    minimum: versionInfo.minimum,
+    releaseNotes: versionInfo.releaseNotes,
+    releaseUrl: versionInfo.releaseUrl,
+  };
 }
 
 /**
