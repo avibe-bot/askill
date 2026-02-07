@@ -58,9 +58,9 @@ After installation, read the skill's `SKILL.md` file for usage instructions. Ski
 
 ---
 
-askill is a universal package manager for AI agent skills. It enables agents to discover, install, and use skills across Claude Code, Cursor, Windsurf, and 40+ other AI coding assistants.
+askill is a universal package manager for AI agent skills. It enables agents to discover, install, and use skills across Claude Code, Codex, OpenCode, OpenClaw, Cursor, and 40+ other AI coding assistants.
 
-Every skill on [askill.sh](https://askill.sh) is automatically reviewed by AI across 5 quality dimensions — safety, clarity, reusability, completeness, and actionability — so you can evaluate quality before you install.
+Every skill on [askill.sh](https://askill.sh) is automatically reviewed by AI across 5 strict dimensions - Safety, Clarity, Reusability, Completeness, and Actionability - so risky or malicious skills are filtered out, and truly excellent skills rise to the top of the rankings.
 
 ## Quick Start
 

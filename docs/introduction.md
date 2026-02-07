@@ -4,7 +4,7 @@
 
 ## What is askill?
 
-askill is a package manager designed specifically for AI agents. Just as npm manages packages for Node.js developers, askill manages skills for AI agents like Claude Code, Cursor, Windsurf, and others.
+askill is a package manager designed specifically for AI agents. Just as npm manages packages for Node.js developers, askill manages skills for AI agents like Claude Code, Codex, OpenCode, OpenClaw, Cursor, and others.
 
 ## The Problem
 
@@ -14,6 +14,7 @@ AI agents are becoming increasingly capable, but they lack a standardized way to
 2. **Install skills** - How do you add new capabilities to your agent?
 3. **Share skills** - How do skill authors distribute their work?
 4. **Manage dependencies** - How do skills depend on other skills?
+5. **Trust skill safety** - How do you avoid risky or malicious skills mixed into public repos?
 
 Currently, each agent has its own ad-hoc approach:
 - Claude Code uses `.claude/` directory with markdown files
@@ -74,6 +75,14 @@ Traditional package managers are designed for humans to read JSON configs and ru
 - **Natural language setup instructions** - Agents read and execute them
 - **Unified command interface** - `askill run skill:command` works everywhere
 - **Smart dependency resolution** - Skills can depend on other skills
+
+### 4. Strict AI Skill Scoring
+
+Every indexed skill is scored by AI across five dimensions: **Safety, Clarity, Reusability, Completeness, and Actionability**.
+
+- **Safety first** - risky or malicious skills are filtered out early
+- **Quality ranking** - excellent skills are promoted to top positions
+- **Transparent evaluation** - users can compare skill quality before installing
 
 ## Design Philosophy
 

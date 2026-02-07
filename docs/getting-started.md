@@ -64,7 +64,7 @@ Output:
   Install:     askill add @anthropic/memory
 ```
 
-You can also browse skills on [askill.sh](https://askill.sh), where each skill shows its AI Quality Score across 5 dimensions (safety, clarity, reusability, completeness, actionability) with a detailed review summary.
+You can also browse skills on [askill.sh](https://askill.sh), where each skill shows its AI Quality Score across 5 dimensions (Safety, Clarity, Reusability, Completeness, Actionability). This strict screening helps filter risky skills and push excellent ones higher in the rankings.
 
 ### 3. Install a Skill
 
@@ -74,7 +74,7 @@ askill add @anthropic/memory
 
 The CLI will:
 1. Download the skill
-2. Detect installed agents (Claude Code, Cursor, etc.)
+2. Detect installed agents (Claude Code, Codex, OpenCode, OpenClaw, Cursor, etc.)
 3. Ask which agents to configure
 4. Install and configure automatically
 
@@ -136,7 +136,7 @@ askill list
 
 # Output:
 # Installed skills:
-#   @anthropic/memory (v1.2.0) - Claude Code, Cursor
+#   @anthropic/memory (v1.2.0) - Claude Code, Codex, OpenCode, OpenClaw, Cursor
 #   gh:facebook/react/scripts/error-codes - Claude Code
 ```
 
