@@ -86,6 +86,7 @@ clean_workspace() {
   rm -rf "$WORKSPACE"/.agents
   rm -rf /root/.claude/skills /root/.cursor/skills /root/.opencode/skills
   rm -rf /root/.config/askill
+  rm -rf /root/.askill
   mkdir -p "$WORKSPACE"
 }
 
@@ -118,6 +119,137 @@ test_help() {
   assert_contains "$output" "--global" "shows global flag"
   assert_contains "$output" "--yes" "shows yes flag"
   assert_contains "$output" "--copy" "shows copy flag"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Submit command - invalid URL
+# ════════════════════════════════════════════════════
+test_submit_invalid_url() {
+  header "Submit - invalid URL"
+
+  local output
+  output=$($CLI submit https://example.com 2>&1) || true
+
+  assert_contains "$output" "Not a valid GitHub URL" "rejects non-GitHub URL"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Login command - invalid token
+# ════════════════════════════════════════════════════
+test_login_invalid_token() {
+  header "Login - invalid token"
+  clean_workspace
+
+  local output
+  output=$($CLI login --token ask_invalid_token_value 2>&1) || true
+
+  assert_contains "$output" "Invalid token" "login reports invalid token"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Whoami command - not logged in
+# ════════════════════════════════════════════════════
+test_whoami_not_logged_in() {
+  header "Whoami - not logged in"
+  clean_workspace
+
+  local output
+  output=$($CLI whoami 2>&1) || true
+
+  assert_contains "$output" "Not logged in" "whoami requires login"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Logout command clears credentials
+# ════════════════════════════════════════════════════
+test_logout_clears_credentials() {
+  header "Logout - clears credentials"
+  clean_workspace
+
+  mkdir -p /root/.askill
+  cat > /root/.askill/credentials.json <<'JSON'
+{
+  "token": "ask_test_token",
+  "username": "tester"
+}
+JSON
+
+  local output
+  output=$($CLI logout 2>&1) || true
+
+  assert_contains "$output" "Logged out" "logout reports success"
+
+  if [ ! -f "/root/.askill/credentials.json" ]; then
+    pass "credentials file removed"
+  else
+    fail "credentials file still exists after logout"
+  fi
+}
+
+# ════════════════════════════════════════════════════
+# Test: Publish command - requires login
+# ════════════════════════════════════════════════════
+test_publish_requires_login() {
+  header "Publish - requires login"
+  clean_workspace
+
+  local output
+  output=$(cd "$WORKSPACE" && $CLI publish . 2>&1) || true
+
+  assert_contains "$output" "Not logged in" "publish requires login"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Publish command - local validation
+# ════════════════════════════════════════════════════
+test_publish_local_validation() {
+  header "Publish - local metadata validation"
+  clean_workspace
+
+  mkdir -p /root/.askill
+  cat > /root/.askill/credentials.json <<'JSON'
+{
+  "token": "ask_fake_token",
+  "username": "tester"
+}
+JSON
+
+  mkdir -p "$WORKSPACE/publish-test"
+  cat > "$WORKSPACE/publish-test/SKILL.md" <<'SKILL'
+---
+name: test-publish
+description: publish validation test
+version: not-semver
+---
+
+# test
+SKILL
+
+  local output
+  output=$(cd "$WORKSPACE" && $CLI publish publish-test 2>&1) || true
+
+  assert_contains "$output" "valid semver version" "publish validates version before API call"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Publish --github command - URL validation
+# ════════════════════════════════════════════════════
+test_publish_github_url_validation() {
+  header "Publish --github - URL validation"
+  clean_workspace
+
+  mkdir -p /root/.askill
+  cat > /root/.askill/credentials.json <<'JSON'
+{
+  "token": "ask_fake_token",
+  "username": "tester"
+}
+JSON
+
+  local output
+  output=$(cd "$WORKSPACE" && $CLI publish --github https://github.com/foo/bar 2>&1) || true
+
+  assert_contains "$output" "Invalid GitHub file URL" "publish --github validates blob URL"
 }
 
 # ════════════════════════════════════════════════════
@@ -1531,6 +1663,13 @@ test_help_flags() {
 ALL_TESTS=(
   test_banner
   test_help
+  test_submit_invalid_url
+  test_login_invalid_token
+  test_whoami_not_logged_in
+  test_logout_clears_credentials
+  test_publish_requires_login
+  test_publish_local_validation
+  test_publish_github_url_validation
   test_version
   test_unknown_command
   test_add_missing_name
