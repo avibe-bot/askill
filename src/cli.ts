@@ -102,6 +102,9 @@ ${BOLD}Install Options:${RESET}
 ${BOLD}Run Options:${RESET}
   askill run <skill>:<command>      Run a skill's command
 
+${BOLD}Search Options:${RESET}
+  --full-desc             Show full skill descriptions in find/search
+
 ${BOLD}Options:${RESET}
   --help, -h            Show this help message
   --version, -v         Show version number
@@ -111,6 +114,7 @@ ${BOLD}Examples:${RESET}
   ${DIM}$${RESET} askill add anthropic/courses
   ${DIM}$${RESET} askill add ./my-skills/custom-skill
   ${DIM}$${RESET} askill find memory
+  ${DIM}$${RESET} askill find memory --full-desc
   ${DIM}$${RESET} askill list -g
   ${DIM}$${RESET} askill info gh:anthropic/courses@prompt-eng
 
@@ -729,7 +733,12 @@ async function runInstall(args: string[]): Promise<void> {
 // Search Command
 // ============================================
 
-const SEARCH_DESCRIPTION_MAX_LENGTH = 180;
+const SEARCH_DESCRIPTION_MAX_LENGTH = 500;
+
+interface SearchOptions {
+  fullDesc: boolean;
+  query: string;
+}
 
 interface AIScoreDimension {
   key: string;
@@ -874,8 +883,34 @@ function getAIScoreDimensions(skill: Skill): AIScoreDimension[] {
   });
 }
 
+function normalizeInfoTarget(input: string): string {
+  const trimmed = input.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+
+  const withoutGh = trimmed.replace(/^gh:/i, '');
+
+  const askillSkillUrl = withoutGh.match(/^https?:\/\/askill\.sh\/skills\/(.+)$/i);
+  if (askillSkillUrl && askillSkillUrl[1]) {
+    return askillSkillUrl[1];
+  }
+
+  return withoutGh;
+}
+
+function parseSearchOptions(args: string[]): SearchOptions {
+  const fullDesc = args.includes('--full-desc');
+  const query = args.filter((arg) => arg !== '--full-desc').join(' ');
+
+  return {
+    fullDesc,
+    query,
+  };
+}
+
 async function runSearch(args: string[]): Promise<void> {
-  const query = args.join(' ');
+  const { fullDesc, query } = parseSearchOptions(args);
 
   console.log();
   p.intro(pc.bgCyan(pc.black(' askill search ')));
@@ -907,7 +942,11 @@ async function runSearch(args: string[]): Promise<void> {
       console.log(`  ${pc.cyan(displayName)} ${pc.dim(`by ${owner}`)}`);
       console.log(`  ${pc.dim('AI score:')} ${formatScore(aiScore)}`);
       if (description) {
-        console.log(`  ${pc.dim(description.slice(0, SEARCH_DESCRIPTION_MAX_LENGTH))}${description.length > SEARCH_DESCRIPTION_MAX_LENGTH ? '...' : ''}`);
+        if (fullDesc) {
+          console.log(`  ${pc.dim(description)}`);
+        } else {
+          console.log(`  ${pc.dim(description.slice(0, SEARCH_DESCRIPTION_MAX_LENGTH))}${description.length > SEARCH_DESCRIPTION_MAX_LENGTH ? '...' : ''}`);
+        }
       }
       // Build install command - use gh: prefix
       const installCmd = skill.owner && skill.repo
@@ -1034,13 +1073,15 @@ async function runRemove(args: string[]): Promise<void> {
 // ============================================
 
 async function runInfo(args: string[]): Promise<void> {
-  const skillName = args[0];
+  const inputTarget = args[0];
 
-  if (!skillName) {
+  if (!inputTarget) {
     console.log(`${RED}Error: Missing skill name${RESET}`);
     console.log(`Usage: askill info <skill-name>`);
     process.exit(1);
   }
+
+  const skillName = normalizeInfoTarget(inputTarget);
 
   console.log();
   p.intro(pc.bgCyan(pc.black(' askill info ')));

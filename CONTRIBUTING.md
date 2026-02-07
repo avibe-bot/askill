@@ -58,9 +58,8 @@ askill/
 │   ├── cli-reference.md    # CLI commands reference
 │   └── api-spec.md         # REST API specification
 ├── skills/                 # Official bundled skills
-│   └── @askill/
-│       ├── agent/          # Teaches agents to use skills
-│       └── developer/      # Teaches agents to develop skills
+│   ├── use-askill/         # Teaches agents to use askill effectively
+│   └── build-askill-skill/ # Teaches agents to author askill skills
 ├── test/
 │   └── e2e/
 │       ├── run.sh          # Main E2E test suite
@@ -129,7 +128,7 @@ docker run --rm askill-install-test github
 node dist/cli.mjs --help
 
 # Test with local skill
-node dist/cli.mjs add ./skills/@askill/agent -y
+node dist/cli.mjs add ./skills/use-askill -y
 ```
 
 ## Release Process
