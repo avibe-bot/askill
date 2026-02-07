@@ -58,10 +58,13 @@ Output:
   Author:      anthropic
   Version:     1.2.0
   Stars:       1,234
+  AI Score:    95/100
   Tags:        memory, context, persistence
 
   Install:     askill add @anthropic/memory
 ```
+
+You can also browse skills on [askill.sh](https://askill.sh), where each skill shows its AI Quality Score across 5 dimensions (safety, clarity, reusability, completeness, actionability) with a detailed review summary.
 
 ### 3. Install a Skill
 
@@ -112,9 +115,9 @@ askill add gh:facebook/react/scripts/error-codes
 # The gh: prefix indicates an indexed (non-published) skill
 ```
 
-### Running Skill Commands (Planned)
+### Running Skill Commands
 
-Some skills provide commands. When implemented, run them with:
+Some skills provide commands:
 
 ```bash
 askill run <skill>:<command> [args]
@@ -137,7 +140,7 @@ askill list
 #   gh:facebook/react/scripts/error-codes - Claude Code
 ```
 
-### Update Skills (Planned)
+### Update Skills
 
 ```bash
 # Update a specific skill
@@ -177,3 +180,14 @@ askill add @anthropic/memory --agent claude-code cursor
 - [SKILL.md Specification](./skill-spec.md) - Create your own skill
 - [Publishing Guide](./publishing.md) - Share your skill
 - [CLI Reference](./cli-reference.md) - All available commands
+
+## Submit and Publish
+
+```bash
+# Submit a GitHub URL for indexing
+askill submit https://github.com/owner/repo
+
+# Login with account token and publish a local skill
+askill login
+askill publish
+```

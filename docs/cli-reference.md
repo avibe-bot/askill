@@ -28,11 +28,12 @@ npx askill-cli <command>
 | `askill check` | Implemented | Check installed skills for available updates |
 | `askill upgrade` | Implemented | Update askill CLI to latest version |
 | `askill run` | Implemented | Run a skill command |
-| `askill login` | Planned | Authenticate with GitHub |
-| `askill logout` | Planned | Remove stored credentials |
-| `askill publish` | Planned | Publish a skill |
+| `askill submit` | Implemented | Submit GitHub URL for indexing |
+| `askill login` | Implemented | Authenticate with API token |
+| `askill logout` | Implemented | Remove stored credentials |
+| `askill whoami` | Implemented | Show authenticated user |
+| `askill publish` | Implemented | Publish a skill |
 | `askill validate` | Implemented | Validate a SKILL.md |
-| `askill token` | Planned | Manage authentication tokens |
 
 ---
 
@@ -339,6 +340,73 @@ askill run <skill>:<command> [args...]
 | Argument | Description |
 |----------|-------------|
 | `skill` | Skill slug |
+
+---
+
+## askill submit
+
+Submit a GitHub URL to askill registry for indexing.
+
+### Usage
+
+```bash
+askill submit <github-url>
+```
+
+### Examples
+
+```bash
+# Submit a full repo
+askill submit https://github.com/remorses/playwriter
+
+# Submit a specific skill file
+askill submit https://github.com/remorses/playwriter/blob/main/skills/playwriter/SKILL.md
+```
+
+---
+
+## askill login / logout / whoami
+
+Token-based authentication for publish operations.
+
+### Usage
+
+```bash
+askill login
+askill login --token <ask_xxx>
+askill logout
+askill whoami
+```
+
+### Notes
+
+- Generate/copy your token from `https://askill.sh/account`
+- Credentials are stored in `~/.askill/credentials.json`
+- `askill login` validates token immediately via registry API
+
+---
+
+## askill publish
+
+Publish a skill to askill registry.
+
+### Usage
+
+```bash
+# Publish from local directory (default: current directory)
+askill publish
+askill publish ./path/to/skill
+
+# Publish from GitHub SKILL.md URL
+askill publish --github https://github.com/owner/repo/blob/main/path/to/SKILL.md
+```
+
+### Behavior
+
+- Requires prior login (`askill login`)
+- Reads metadata from `SKILL.md` frontmatter (`name`, `version`, etc.)
+- Validates semver `version` locally before API submission
+- For `--github`, CLI prefetches file for quick validation before publishing
 | `command` | Command name (defined in SKILL.md) |
 | `args` | Arguments passed to the command |
 

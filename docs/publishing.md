@@ -61,13 +61,14 @@ Instructions for using this skill...
 askill login
 ```
 
-This opens your browser to authenticate with GitHub. Your GitHub username becomes your scope (`@username`).
+Login uses an API token from your account page. Run `askill login`, then paste the token from `https://askill.sh/account`.
 
 ```
 ◆ askill login
 
-  Opening browser for GitHub authentication...
-  
+  To get your token, visit: https://askill.sh/account
+  Token: ask_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
   ✓ Logged in as @johndoe
   
   You can now publish skills under the @johndoe scope.
@@ -104,11 +105,9 @@ askill publish
 ```
 ◆ askill publish
 
-  Publishing @johndoe/awesome-tool@1.0.0...
+  Publishing skill...
 
-  ✓ Uploaded SKILL.md
-  ✓ Uploaded scripts/main.py
-  ✓ Registered in registry
+  ✓ Published @johndoe/awesome-tool@1.0.0
   
   Published! Install with:
     askill add @johndoe/awesome-tool
@@ -145,35 +144,15 @@ askill publish
   ✓ Published @johndoe/awesome-tool@1.1.0
 ```
 
-## Organization Scopes
-
-If you're a member of a GitHub organization, you can publish under the org's scope:
-
-```bash
-askill publish --scope mycompany
-```
-
-Requirements:
-- You must have write access to the organization
-- First publish under an org scope claims it
-
 ## What Gets Published
 
-When you run `askill publish`, these files are uploaded:
+When you run `askill publish`, registry stores SKILL content and metadata from frontmatter.
 
 | File/Directory | Required | Description |
 |----------------|----------|-------------|
-| `SKILL.md` | Yes | The skill definition |
-| `scripts/` | No | Executable scripts |
-| `assets/` | No | Additional resources |
-| `README.md` | No | Displayed on askill.sh |
+| `SKILL.md` | Yes | The skill definition and metadata source |
 
-Files that are **never** uploaded:
-- `.git/`
-- `node_modules/`
-- `.env`, `.env.*`
-- `*.log`
-- Files in `.gitignore`
+For `--github` publish, registry fetches the target `SKILL.md` from the provided URL.
 
 ## Version Management
 
@@ -210,21 +189,10 @@ askill add @johndoe/awesome-tool@beta     # Gets latest beta
 askill add @johndoe/awesome-tool@2.0.0-beta.1  # Exact pre-release
 ```
 
-## Unpublishing
+## Submit vs Publish
 
-You can unpublish a version within 72 hours of publishing:
-
-```bash
-askill unpublish @johndoe/awesome-tool@1.0.0
-```
-
-After 72 hours, versions cannot be unpublished (to prevent breaking dependents).
-
-To deprecate a skill (but keep it available):
-
-```bash
-askill deprecate @johndoe/awesome-tool --message "Use @johndoe/better-tool instead"
-```
+- `askill submit <github-url>`: community indexing entry, no auth required.
+- `askill publish`: author-owned release under `@author/skill-name`, requires login token.
 
 ## Publishing via CI/CD
 

@@ -24,6 +24,13 @@ askill list
 # Search for skills
 askill find <query>
 
+# Submit a GitHub skill URL for indexing
+askill submit https://github.com/owner/repo
+
+# Login and publish your own skill
+askill login --token ask_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+askill publish
+
 # Run a skill command
 askill run skill-name:command
 ```
@@ -49,6 +56,8 @@ After installation, read the skill's `SKILL.md` file for usage instructions. Ski
 ---
 
 askill is a universal package manager for AI agent skills. It enables agents to discover, install, and use skills across Claude Code, Cursor, Windsurf, and 40+ other AI coding assistants.
+
+Every skill on [askill.sh](https://askill.sh) is automatically reviewed by AI across 5 quality dimensions — safety, clarity, reusability, completeness, and actionability — so you can evaluate quality before you install.
 
 ## Quick Start
 
@@ -175,7 +184,8 @@ Instructions for the agent...
 
 2. Test locally: `askill add ./my-skill`
 3. Validate: `askill validate`
-4. Publish: Push to GitHub, it's automatically indexed
+4. Submit for indexing: `askill submit https://github.com/<owner>/<repo>`
+5. Publish under your author scope: `askill login` then `askill publish`
 
 See [Publishing Guide](./docs/publishing.md) for details.
 
