@@ -8,6 +8,7 @@ import { api, APIError, type Skill, type RepoSkill } from './api.ts';
 import { installSkill, installSkillFromDir, detectInstalledAgents, listInstalledSkills, removeSkill, isSkillInstalled, sanitizeName, type InstallMode } from './installer.ts';
 import { checkForUpdates, selfUpdate } from './updater.ts';
 import { getPreferredAgents, savePreferredAgents } from './config.ts';
+import { loadCredentials, saveCredentials, clearCredentials, maskToken } from './credentials.ts';
 import { extractDependencies, parseDependency, dependencyToSlug, parseSkillMd } from './parser.ts';
 import { parseSource, type ParsedSource } from './source-parser.ts';
 import { discoverSkills, filterSkills, type DiscoveredSkill } from './discover.ts';
@@ -50,6 +51,9 @@ function showBanner(): void {
   console.log(`  ${DIM}$${RESET} askill list${RESET}              ${DIM}List installed skills${RESET}`);
   console.log(`  ${DIM}$${RESET} askill remove ${DIM}<skill>${RESET}   ${DIM}Remove a skill${RESET}`);
   console.log(`  ${DIM}$${RESET} askill init${RESET}              ${DIM}Create a new skill${RESET}`);
+  console.log(`  ${DIM}$${RESET} askill submit ${DIM}<url>${RESET}   ${DIM}Submit GitHub skill URL${RESET}`);
+  console.log(`  ${DIM}$${RESET} askill login${RESET}             ${DIM}Login with API token${RESET}`);
+  console.log(`  ${DIM}$${RESET} askill publish${RESET}           ${DIM}Publish a skill${RESET}`);
   console.log(`  ${DIM}$${RESET} askill run ${DIM}<skill:cmd>${RESET}  ${DIM}Run a skill command${RESET}`);
   console.log();
   console.log(`${DIM}Browse skills at${RESET} ${CYAN}https://askill.sh${RESET}`);
@@ -70,6 +74,12 @@ ${BOLD}Commands:${RESET}
   validate [path]          Validate a SKILL.md file
   check                    Check installed skills for updates
   update [skill]           Update installed skills
+  submit <github-url>      Submit GitHub URL for indexing
+  login [--token <token>]  Login with API token
+  logout                   Clear saved API token
+  whoami                   Show current authenticated user
+  publish [path]           Publish SKILL.md from local path
+  publish --github <url>   Publish SKILL.md from GitHub URL
   run <skill:cmd>          Run a skill command
   upgrade                  Update askill CLI to latest version
 
@@ -1785,6 +1795,202 @@ async function runInit(args: string[]): Promise<void> {
 }
 
 // ============================================
+// Submit / Auth / Publish Commands
+// ============================================
+
+async function runSubmit(args: string[]): Promise<void> {
+  const url = args.find((a) => !a.startsWith('-'));
+  if (!url) {
+    console.log(`${RED}Usage: askill submit <github-url>${RESET}`);
+    process.exit(1);
+  }
+
+  console.log();
+  p.intro(pc.bgCyan(pc.black(' askill submit ')));
+  const spinner = p.spinner();
+  spinner.start('Submitting URL for indexing...');
+
+  try {
+    const result = await api.submit(url);
+    spinner.stop(pc.green(result.message));
+
+    console.log();
+    for (const skill of result.skills) {
+      const statusColor =
+        skill.status === 'indexed' ? pc.green : skill.status === 'skipped' ? pc.yellow : pc.red;
+      console.log(`  ${statusColor(skill.status.padEnd(7))} ${pc.dim(skill.path)}${skill.name ? ` (${skill.name})` : ''}`);
+    }
+
+    p.outro(pc.green(`Submitted ${pc.cyan(`${result.repoOwner}/${result.repoName}`)}`));
+  } catch (error) {
+    spinner.stop(pc.red('Submit failed'));
+    if (error instanceof APIError) {
+      p.log.error(error.message);
+    } else {
+      p.log.error(error instanceof Error ? error.message : 'Unknown error');
+    }
+    p.outro(pc.red('Failed'));
+    process.exit(1);
+  }
+}
+
+async function runLogin(args: string[]): Promise<void> {
+  let token = '';
+  const tokenFlagIndex = args.findIndex((a) => a === '--token');
+  if (tokenFlagIndex >= 0 && args[tokenFlagIndex + 1]) {
+    token = args[tokenFlagIndex + 1];
+  }
+
+  if (!token) {
+    console.log();
+    p.note(`To get your token, visit: ${pc.cyan(`${REGISTRY_URL}/account`)}`);
+    const input = await p.password({
+      message: 'API token',
+      placeholder: 'ask_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
+      mask: '*',
+      validate: (value) => {
+        if (!value) return 'Token is required';
+        if (!value.startsWith('ask_')) return 'Token must start with ask_';
+        return undefined;
+      },
+    });
+
+    if (p.isCancel(input)) {
+      p.cancel('Login cancelled');
+      return;
+    }
+    token = input as string;
+  }
+
+  const spinner = p.spinner();
+  spinner.start('Verifying token...');
+
+  try {
+    const me = await api.authMe(token);
+    const username = me.username ?? undefined;
+    await saveCredentials({ token, username });
+    spinner.stop(pc.green(`Logged in as @${username ?? 'unknown'}`));
+    p.outro(pc.green('Authentication saved'));
+  } catch (error) {
+    spinner.stop(pc.red('Invalid token'));
+    if (error instanceof APIError) {
+      p.log.error(error.message);
+    } else {
+      p.log.error(error instanceof Error ? error.message : 'Unknown error');
+    }
+    p.outro(pc.red('Login failed'));
+    process.exit(1);
+  }
+}
+
+async function runLogout(): Promise<void> {
+  await clearCredentials();
+  p.outro(pc.green('Logged out'));
+}
+
+async function runWhoami(): Promise<void> {
+  const creds = await loadCredentials();
+  if (!creds) {
+    p.log.warn('Not logged in. Run askill login first.');
+    return;
+  }
+
+  try {
+    const me = await api.authMe(creds.token);
+    const username = me.username ?? creds.username ?? 'unknown';
+    console.log(`@${username} (token: ${maskToken(creds.token)})`);
+  } catch {
+    console.log(`Stored token appears invalid (token: ${maskToken(creds.token)})`);
+    process.exit(1);
+  }
+}
+
+async function runPublish(args: string[]): Promise<void> {
+  const creds = await loadCredentials();
+  if (!creds?.token) {
+    p.log.error('Not logged in. Run askill login first.');
+    process.exit(1);
+  }
+
+  const githubFlagIndex = args.findIndex((a) => a === '--github');
+  const githubUrl = githubFlagIndex >= 0 ? args[githubFlagIndex + 1] : undefined;
+  const localPath = args.find((a) => !a.startsWith('-')) || '.';
+
+  let content = '';
+  if (githubUrl) {
+    const rawUrl = toRawGitHubUrl(githubUrl);
+    if (!rawUrl) {
+      p.log.error('Invalid GitHub file URL. Use a blob URL to SKILL.md');
+      process.exit(1);
+    }
+
+    const spinner = p.spinner();
+    spinner.start('Fetching SKILL.md from GitHub...');
+    const res = await fetch(rawUrl);
+    if (!res.ok) {
+      spinner.stop(pc.red('Fetch failed'));
+      p.log.error('Unable to fetch SKILL.md from GitHub URL');
+      process.exit(1);
+    }
+    content = await res.text();
+    spinner.stop('Fetched');
+  } else {
+    const fs = await import('fs/promises');
+    const skillPath = localPath.endsWith('SKILL.md') ? localPath : join(localPath, 'SKILL.md');
+    try {
+      content = await fs.readFile(join(process.cwd(), skillPath), 'utf-8');
+    } catch {
+      p.log.error(`Cannot read ${pc.cyan(skillPath)}`);
+      process.exit(1);
+    }
+  }
+
+  // Local validation
+  const parsed = parseSkillMd(content);
+  const name = typeof parsed.frontmatter.name === 'string' ? parsed.frontmatter.name.trim() : '';
+  const version = typeof parsed.frontmatter.version === 'string' ? parsed.frontmatter.version.trim() : '';
+  if (!name) {
+    p.log.error('SKILL.md must include frontmatter name');
+    process.exit(1);
+  }
+  if (!version || !/^\d+\.\d+\.\d+(?:-[\w.]+)?(?:\+[\w.]+)?$/.test(version)) {
+    p.log.error('SKILL.md must include a valid semver version');
+    process.exit(1);
+  }
+
+  console.log();
+  p.intro(pc.bgCyan(pc.black(' askill publish ')));
+  const spinner = p.spinner();
+  spinner.start('Publishing skill...');
+
+  try {
+    const result = await api.publish({
+      token: creds.token,
+      githubUrl,
+      content: githubUrl ? undefined : content,
+    });
+    spinner.stop(pc.green(`Published ${result.slug}@${result.version}`));
+    p.outro(pc.cyan(result.url));
+  } catch (error) {
+    spinner.stop(pc.red('Publish failed'));
+    if (error instanceof APIError) {
+      p.log.error(error.message);
+    } else {
+      p.log.error(error instanceof Error ? error.message : 'Unknown error');
+    }
+    p.outro(pc.red('Failed'));
+    process.exit(1);
+  }
+}
+
+function toRawGitHubUrl(url: string): string | null {
+  const match = url.match(/^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/blob\/[^/]+\/(.+)$/);
+  if (!match) return null;
+  const [, owner, repo, path] = match;
+  return `https://raw.githubusercontent.com/${owner}/${repo}/HEAD/${path}`;
+}
+
+// ============================================
 // Main
 // ============================================
 
@@ -1853,6 +2059,26 @@ async function main(): Promise<void> {
 
     case 'init':
       await runInit(restArgs);
+      break;
+
+    case 'submit':
+      await runSubmit(restArgs);
+      break;
+
+    case 'login':
+      await runLogin(restArgs);
+      break;
+
+    case 'logout':
+      await runLogout();
+      break;
+
+    case 'whoami':
+      await runWhoami();
+      break;
+
+    case 'publish':
+      await runPublish(restArgs);
       break;
 
     case '--help':
