@@ -78,6 +78,33 @@ export interface CLIVersionInfo {
   downloadUrls: Record<string, string>;
 }
 
+export interface SubmitSkillResult {
+  name: string | null;
+  path: string;
+  status: 'indexed' | 'skipped' | 'failed';
+}
+
+export interface SubmitResponse {
+  repoOwner: string;
+  repoName: string;
+  message: string;
+  skills: SubmitSkillResult[];
+}
+
+export interface AuthMeResponse {
+  username: string | null;
+  name: string | null;
+  image: string | null;
+}
+
+export interface PublishResponse {
+  id: number;
+  slug: string;
+  version: string;
+  url: string;
+  message: string;
+}
+
 class APIClient {
   private baseUrl: string;
 
@@ -188,6 +215,43 @@ class APIClient {
    */
   async checkCLIVersion(): Promise<CLIVersionInfo> {
     return this.fetch<CLIVersionInfo>('/cli/version');
+  }
+
+  /**
+   * Submit GitHub URL for indexing
+   */
+  async submit(url: string): Promise<SubmitResponse> {
+    return this.fetch<SubmitResponse>('/submit', {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+    });
+  }
+
+  /**
+   * Verify API token and fetch user profile
+   */
+  async authMe(token: string): Promise<AuthMeResponse> {
+    return this.fetch<AuthMeResponse>('/auth/me', {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+  }
+
+  /**
+   * Publish a skill from local content or GitHub URL
+   */
+  async publish(payload: { token: string; content?: string; githubUrl?: string }): Promise<PublishResponse> {
+    return this.fetch<PublishResponse>('/publish', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${payload.token}`,
+      },
+      body: JSON.stringify({
+        content: payload.content,
+        githubUrl: payload.githubUrl,
+      }),
+    });
   }
 }
 
