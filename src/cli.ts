@@ -84,6 +84,7 @@ ${BOLD}Commands:${RESET}
   upgrade                  Update askill CLI to latest version
 
 ${BOLD}Skill Source Formats:${RESET}
+  @author/skill-name                    Published skill from askill registry
   owner/repo                          All skills from a GitHub repo
   owner/repo@skill-name               Specific skill by name
   owner/repo/path/to/skill            Specific skill by path
@@ -92,6 +93,7 @@ ${BOLD}Skill Source Formats:${RESET}
   gh:owner/repo@skill-name            Explicit GitHub prefix (optional)
 
 ${BOLD}Install Options:${RESET}
+  (default)             Install to current project: .agents/skills/
   -g, --global          Install globally (user-level)
   -a, --agent <agents>  Install to specific agents
   -y, --yes             Skip confirmation prompts
@@ -113,6 +115,9 @@ ${BOLD}Per-command Help:${RESET}
   askill <command> --help
   askill help <command>
 
+${BOLD}For Agents:${RESET}
+  Official usage guide: ${CYAN}https://github.com/avibe-bot/askill/tree/main/skills/use-askill${RESET}
+
 ${BOLD}Examples:${RESET}
   ${DIM}$${RESET} askill add anthropic/courses@prompt-eng
   ${DIM}$${RESET} askill add anthropic/courses
@@ -124,6 +129,24 @@ ${BOLD}Examples:${RESET}
 
 ${DIM}Browse more at${RESET} ${CYAN}https://askill.sh${RESET}
 `);
+}
+
+interface SpinnerLike {
+  start: (message: string) => void;
+  stop: (message?: string) => void;
+  message: (message: string) => void;
+}
+
+function createSpinner(plain: boolean): SpinnerLike {
+  if (!plain) {
+    return p.spinner() as SpinnerLike;
+  }
+
+  return {
+    start: () => {},
+    stop: () => {},
+    message: () => {},
+  };
 }
 
 function normalizeCommand(command: string): string {
@@ -150,7 +173,7 @@ function showCommandHelp(commandInput: string): boolean {
   const command = normalizeCommand(commandInput);
 
   const helps: Record<string, string> = {
-    add: `${BOLD}askill add${RESET}\n\nUsage:\n  askill add <source> [options]\n\nDescription:\n  Install skills from published slugs, GitHub, or local directories.\n\nSources:\n  @author/skill-name\n  gh:owner/repo@skill-name\n  gh:owner/repo/path/to/skill\n  owner/repo\n  ./local/path\n\nOptions:\n  -g, --global            Install globally\n  -a, --agent <agents...> Install to specific agents\n  -y, --yes               Skip confirmation prompts\n  --copy                  Copy files instead of symlink\n  -l, --list              Preview discovered skills only\n  --all                   Install all discovered skills\n\nExamples:\n  askill add @johndoe/awesome-tool -y\n  askill add gh:facebook/react@extract-errors\n  askill add owner/repo --all -a claude-code opencode -y`,
+    add: `${BOLD}askill add${RESET}\n\nUsage:\n  askill add <source> [options]\n\nDescription:\n  Install skills from published slugs, GitHub, or local directories.\n\nSources:\n  @author/skill-name\n  gh:owner/repo@skill-name\n  gh:owner/repo/path/to/skill\n  owner/repo\n  ./local/path\n\nScope:\n  default: current project (.agents/skills/)\n  -g, --global: user-level install\n\nOptions:\n  -g, --global            Install globally\n  -a, --agent <agents...> Install to specific agents\n  -y, --yes               Skip confirmation prompts\n  --copy                  Copy files instead of symlink\n  -l, --list              Preview discovered skills only\n  --all                   Install all discovered skills\n\nExamples:\n  askill add @johndoe/awesome-tool -y\n  askill add gh:facebook/react@extract-errors\n  askill add owner/repo --all -a claude-code opencode -y\n\nGuide:\n  https://github.com/avibe-bot/askill/tree/main/skills/use-askill`,
 
     remove: `${BOLD}askill remove${RESET}\n\nUsage:\n  askill remove <skill> [options]\n\nDescription:\n  Remove an installed skill from detected agents.\n\nOptions:\n  -g, --global            Remove global installation\n\nExamples:\n  askill remove memory\n  askill remove memory -g`,
 
@@ -265,7 +288,7 @@ function parseInstallOptions(args: string[]): { skillName: string; options: Inst
  */
 async function resolveSkills(
   source: string,
-  spinner: ReturnType<typeof p.spinner>,
+  spinner: SpinnerLike,
   options: InstallOptions,
 ): Promise<{
   skills: DiscoveredSkill[];
@@ -337,7 +360,7 @@ async function resolveSkills(
  */
 async function resolveSkillsViaApi(
   parsed: ParsedSource,
-  spinner: ReturnType<typeof p.spinner>,
+  spinner: SpinnerLike,
   options: InstallOptions,
 ): Promise<{ skills: DiscoveredSkill[]; parsed: ParsedSource }> {
   const { owner, repo, skillFilter, subpath } = parsed;
@@ -412,11 +435,13 @@ async function resolveSkillsViaApi(
 
 async function runInstall(args: string[]): Promise<void> {
   const { skillName, options } = parseInstallOptions(args);
+  const plainMode = Boolean(options.yes) || !process.stdout.isTTY;
 
   if (!skillName) {
     console.log(`${RED}Error: Missing skill identifier${RESET}`);
     console.log(`Usage: askill add <source>`);
     console.log(`\nFormats supported:`);
+    console.log(`  askill add @author/skill-name                 ${DIM}# published skill${RESET}`);
     console.log(`  askill add owner/repo                         ${DIM}# all skills from repo${RESET}`);
     console.log(`  askill add owner/repo@skill-name              ${DIM}# specific skill${RESET}`);
     console.log(`  askill add owner/repo/path/to/skill           ${DIM}# skill by path${RESET}`);
@@ -425,10 +450,12 @@ async function runInstall(args: string[]): Promise<void> {
     process.exit(1);
   }
 
-  console.log();
-  p.intro(pc.bgCyan(pc.black(' askill install ')));
+  if (!plainMode) {
+    console.log();
+    p.intro(pc.bgCyan(pc.black(' askill install ')));
+  }
 
-  const spinner = p.spinner();
+  const spinner = createSpinner(plainMode);
 
   // Step 1: Resolve skills (clone or API)
   const { skills: discoveredSkills, parsed: sourceParsed, tempDir } = await resolveSkills(skillName, spinner, options);
@@ -442,7 +469,11 @@ async function runInstall(args: string[]): Promise<void> {
 
   if (discoveredSkills.length === 0) {
     p.log.warning('No skills found');
-    p.outro(`Browse skills at ${pc.cyan('https://askill.sh')}`);
+    if (plainMode) {
+      console.log(`Browse skills at ${pc.cyan('https://askill.sh')}`);
+    } else {
+      p.outro(`Browse skills at ${pc.cyan('https://askill.sh')}`);
+    }
     return;
   }
 
@@ -461,7 +492,11 @@ async function runInstall(args: string[]): Promise<void> {
       }
       console.log();
     }
-    p.outro(`Install with: ${pc.cyan(`askill add ${skillName} --all`)}`);
+    if (plainMode) {
+      console.log(`Install with: ${pc.cyan(`askill add ${skillName} --all`)}`);
+    } else {
+      p.outro(`Install with: ${pc.cyan(`askill add ${skillName} --all`)}`);
+    }
     return;
   }
 
@@ -814,7 +849,11 @@ async function runInstall(args: string[]): Promise<void> {
   }
 
   console.log();
-  p.outro(pc.green('Done!'));
+  if (plainMode) {
+    console.log(pc.green('Done!'));
+  } else {
+    p.outro(pc.green('Done!'));
+  }
 
   } finally {
     // Always clean up temp directory from git clone
