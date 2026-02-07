@@ -12,6 +12,10 @@ export interface Skill {
   description: string | null;
   tags: string[];
   stars: number | null;
+  aiScore?: number | null;
+  aiBreakdown?: Record<string, number> | null;
+  llmScore?: number | null;
+  llmScoreMeta?: unknown;
   owner: string | null;          // repoOwner
   repo: string | null;           // repoName
   path: string | null;           // filePath without /SKILL.md

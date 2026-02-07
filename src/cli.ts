@@ -729,6 +729,151 @@ async function runInstall(args: string[]): Promise<void> {
 // Search Command
 // ============================================
 
+const SEARCH_DESCRIPTION_MAX_LENGTH = 180;
+
+interface AIScoreDimension {
+  key: string;
+  label: string;
+  score: number;
+}
+
+function toNumber(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return null;
+  }
+  return value;
+}
+
+function parseJsonObject(value: unknown): Record<string, unknown> | null {
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+
+  return null;
+}
+
+function formatScore(score: number | null): string {
+  if (score === null) {
+    return pc.dim('N/A');
+  }
+  return pc.green(Number.isInteger(score) ? String(score) : score.toFixed(1));
+}
+
+function toScoreLabel(key: string): string {
+  return key
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function getScoreMeta(skill: Skill): Record<string, unknown> | null {
+  const withScoreMeta = skill as Skill & { llmScoreMeta?: unknown };
+  return parseJsonObject(withScoreMeta.llmScoreMeta);
+}
+
+function getTotalAIScore(skill: Skill): number | null {
+  const aiScore = toNumber((skill as Skill & { aiScore?: unknown }).aiScore);
+  if (aiScore !== null) {
+    return aiScore;
+  }
+
+  const directScore = toNumber((skill as Skill & { llmScore?: unknown }).llmScore);
+  if (directScore !== null) {
+    return directScore;
+  }
+
+  const meta = getScoreMeta(skill);
+  if (!meta) {
+    return null;
+  }
+
+  return toNumber(meta.score) ?? toNumber(meta.score_raw) ?? toNumber(meta.final_rank);
+}
+
+function getAIScoreDimensions(skill: Skill): AIScoreDimension[] {
+  const directBreakdown = parseJsonObject((skill as Skill & { aiBreakdown?: unknown }).aiBreakdown);
+  if (directBreakdown) {
+    const parsedDirect = Object.entries(directBreakdown)
+      .map(([key, value]) => {
+        const score = toNumber(value);
+        if (score === null) {
+          return null;
+        }
+        return {
+          key,
+          label: toScoreLabel(key),
+          score,
+        };
+      })
+      .filter((item): item is AIScoreDimension => item !== null);
+
+    if (parsedDirect.length > 0) {
+      const preferredOrder = ['completeness', 'actionability', 'reusability', 'safety', 'clarity', 'internal_only'];
+      return parsedDirect.sort((a, b) => {
+        const indexA = preferredOrder.indexOf(a.key);
+        const indexB = preferredOrder.indexOf(b.key);
+        const rankA = indexA === -1 ? Number.MAX_SAFE_INTEGER : indexA;
+        const rankB = indexB === -1 ? Number.MAX_SAFE_INTEGER : indexB;
+
+        if (rankA !== rankB) {
+          return rankA - rankB;
+        }
+        return a.label.localeCompare(b.label);
+      });
+    }
+  }
+
+  const meta = getScoreMeta(skill);
+  if (!meta) {
+    return [];
+  }
+
+  const dimensions = parseJsonObject(meta.dimensions);
+  if (!dimensions) {
+    return [];
+  }
+
+  const preferredOrder = ['completeness', 'actionability', 'reusability', 'safety', 'clarity', 'internal_only'];
+
+  const parsed = Object.entries(dimensions)
+    .map(([key, value]) => {
+      const nested = parseJsonObject(value);
+      const score = nested ? toNumber(nested.score) : toNumber(value);
+      if (score === null) {
+        return null;
+      }
+      return {
+        key,
+        label: toScoreLabel(key),
+        score,
+      };
+    })
+    .filter((item): item is AIScoreDimension => item !== null);
+
+  return parsed.sort((a, b) => {
+    const indexA = preferredOrder.indexOf(a.key);
+    const indexB = preferredOrder.indexOf(b.key);
+    const rankA = indexA === -1 ? Number.MAX_SAFE_INTEGER : indexA;
+    const rankB = indexB === -1 ? Number.MAX_SAFE_INTEGER : indexB;
+
+    if (rankA !== rankB) {
+      return rankA - rankB;
+    }
+    return a.label.localeCompare(b.label);
+  });
+}
+
 async function runSearch(args: string[]): Promise<void> {
   const query = args.join(' ');
 
@@ -757,10 +902,12 @@ async function runSearch(args: string[]): Promise<void> {
       const displayName = skill.name || 'unknown';
       const owner = skill.owner || 'unknown';
       const description = skill.description || '';
+      const aiScore = getTotalAIScore(skill);
 
       console.log(`  ${pc.cyan(displayName)} ${pc.dim(`by ${owner}`)}`);
+      console.log(`  ${pc.dim('AI score:')} ${formatScore(aiScore)}`);
       if (description) {
-        console.log(`  ${pc.dim(description.slice(0, 80))}${description.length > 80 ? '...' : ''}`);
+        console.log(`  ${pc.dim(description.slice(0, SEARCH_DESCRIPTION_MAX_LENGTH))}${description.length > SEARCH_DESCRIPTION_MAX_LENGTH ? '...' : ''}`);
       }
       // Build install command - use gh: prefix
       const installCmd = skill.owner && skill.repo
@@ -921,6 +1068,15 @@ async function runInfo(args: string[]): Promise<void> {
     }
     if (skill.stars !== null && skill.stars !== undefined) {
       console.log(`  ${pc.dim('Stars:')}      ${skill.stars.toLocaleString()}`);
+    }
+    const aiScore = getTotalAIScore(skill);
+    console.log(`  ${pc.dim('AI score:')}   ${formatScore(aiScore)}`);
+    const aiDimensions = getAIScoreDimensions(skill);
+    if (aiDimensions.length > 0) {
+      console.log(`  ${pc.dim('AI breakdown:')}`);
+      for (const dimension of aiDimensions) {
+        console.log(`    ${pc.dim(`${dimension.label}:`)} ${formatScore(dimension.score)}`);
+      }
     }
     if (skill.tags && skill.tags.length > 0) {
       console.log(`  ${pc.dim('Tags:')}       ${skill.tags.join(', ')}`);
