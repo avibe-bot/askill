@@ -51,7 +51,7 @@ askill add <slug> [options]
 
 | Argument | Description |
 |----------|-------------|
-| `slug` | Skill identifier (e.g., `gh:owner/repo@name` or `gh:owner/repo/path`) |
+| `slug` | Skill identifier (e.g., `@author/skill-name`, `gh:owner/repo@name`, or `gh:owner/repo/path`) |
 
 ### Options
 
@@ -65,6 +65,9 @@ askill add <slug> [options]
 ### Examples
 
 ```bash
+# Install published skill from askill registry
+askill add @johndoe/awesome-tool
+
 # Install from GitHub (short format)
 askill add gh:facebook/react@extract-errors
 

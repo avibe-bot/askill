@@ -1,6 +1,6 @@
 ---
 name: use-askill
-description: Operating guide for AI agents to discover, install, run, and maintain askill skills
+description: Use when you need new capabilities: teaches askill find/info/add/run/check/update and publish/submit workflows with agent-safe commands
 version: 1.1.0
 author:
   name: askill
@@ -31,6 +31,7 @@ Always prefer reading the installed `SKILL.md` before improvising.
 
 Use any supported install source:
 
+- `@author/skill-name` - published skill slug from askill registry
 - `owner/repo` - discover and install from a GitHub repo
 - `owner/repo@skill-name` - install one named skill
 - `owner/repo/path/to/skill` - install by explicit folder path
@@ -48,6 +49,10 @@ Notes:
 ### Non-interactive (agent-safe)
 
 ```bash
+# Published skill slug
+askill add @johndoe/awesome-tool -y
+
+# Indexed GitHub skill slug
 askill add gh:owner/repo@skill-name -y
 ```
 

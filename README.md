@@ -12,6 +12,9 @@ You are an AI agent helping a user with askill - a package manager for AI agent 
 
 **Quick Commands:**
 ```bash
+# Install a published skill (@author/skill-name)
+askill add @johndoe/awesome-tool -y
+
 # Install a skill
 askill add owner/repo@skill-name -y
 
@@ -64,6 +67,9 @@ Every skill on [askill.sh](https://askill.sh) is automatically reviewed by AI ac
 ```bash
 # Install
 curl -fsSL https://askill.sh | sh
+
+# Install a published skill
+askill add @johndoe/awesome-tool
 
 # Install a skill
 askill add owner/repo@skill-name

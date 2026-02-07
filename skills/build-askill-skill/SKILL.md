@@ -1,6 +1,6 @@
 ---
 name: build-askill-skill
-description: Authoring workflow for creating, validating, testing, and publishing askill-compatible skills
+description: Use when creating or modifying a skill: provides askill-compliant SKILL.md rules, commands/dependencies patterns, local test loop, and publish/versioning workflow
 version: 1.1.0
 author:
   name: askill
@@ -71,7 +71,7 @@ Optional:
 
 Dependencies format:
 
-- Published: `@scope/name` or `@scope/name@^1.2.0`
+- Published: `@author/skill-name` or `@author/skill-name@^1.2.0`
 - Indexed GitHub: `gh:owner/repo@skill-name` or `gh:owner/repo/path`
 
 Commands format:
@@ -144,6 +144,7 @@ askill publish --github https://github.com/owner/repo/blob/main/path/to/SKILL.md
 Important:
 
 - `askill publish` requires `name` and valid semver `version`
+- successful publish creates an author-owned slug like `@yourname/<name>`
 - bump `version` before republishing updates
 - use `askill submit <github-url>` when you only want indexing, not account-owned publishing
 

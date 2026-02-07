@@ -72,7 +72,7 @@ Skills are packages that extend an AI agent's capabilities. Each skill contains:
 Skills are identified by slugs:
 
 ```
-@scope/name           # Published skill (e.g., @anthropic/memory)
+@author/skill-name    # Published skill (e.g., @johndoe/awesome-tool)
 gh:owner/repo/path    # Indexed from GitHub (e.g., gh:facebook/react/scripts/errors)
 ```
 
