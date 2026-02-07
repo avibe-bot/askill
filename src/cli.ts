@@ -217,24 +217,16 @@ function showCommandHelp(commandInput: string): boolean {
   return true;
 }
 
-async function maybePromptForUpgrade(commandInput: string): Promise<void> {
+async function maybeAutoUpgradeOnStartup(commandInput: string): Promise<void> {
   const command = normalizeCommand(commandInput);
   const skipCommands = new Set(['upgrade', 'help', 'version', '--version', '-v', '--help', '-h']);
 
   if (skipCommands.has(command)) return;
-  if (!process.stdin.isTTY || !process.stdout.isTTY) return;
 
-  const available = await getAvailableUpdate(true).catch(() => null);
+  const available = await getAvailableUpdate(false).catch(() => null);
   if (!available) return;
 
-  console.log();
-  const shouldUpgrade = await p.confirm({
-    message: `New askill version available (${available.current} -> ${available.latest}). Upgrade now?`,
-    initialValue: true,
-  });
-
-  if (p.isCancel(shouldUpgrade) || !shouldUpgrade) return;
-  console.log();
+  console.log(`${DIM}Auto-updating askill: ${available.current} -> ${available.latest}${RESET}`);
   await selfUpdate();
 }
 
@@ -2347,6 +2339,9 @@ async function main(): Promise<void> {
     return;
   }
 
+  // Auto-update on startup for regular commands
+  await maybeAutoUpgradeOnStartup(command);
+
   switch (command) {
     case 'install':
     case 'i':
@@ -2441,7 +2436,6 @@ async function main(): Promise<void> {
       process.exit(1);
   }
 
-  await maybePromptForUpgrade(command);
 }
 
 main().catch((error) => {
