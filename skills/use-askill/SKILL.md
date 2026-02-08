@@ -136,15 +136,18 @@ Use these routinely:
 
 Treat these as different workflows:
 
-- `askill submit <github-url>`: ask registry to index a GitHub repo/skill
-- `askill publish [path]` or `askill publish --github <blob-url>`: publish under account scope
+- `askill submit <github-url>`: request indexing (and slug-driven publish pipelines)
+- `askill publish [path]`: local publish, requires login token, author = logged-in user
+- `askill publish --github <blob-url>`: GitHub publish, no login required, author = repo owner
 
-Publishing requires login:
+Publishing requires frontmatter `slug` and `version`:
 
-```bash
-askill login --token ask_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-askill whoami
-askill publish
+```yaml
+---
+name: my-skill
+slug: my-skill
+version: 1.0.0
+---
 ```
 
 ## Troubleshooting Checklist

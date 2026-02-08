@@ -406,10 +406,11 @@ askill publish --github https://github.com/owner/repo/blob/main/path/to/SKILL.md
 
 ### Behavior
 
-- Requires prior login (`askill login`)
-- Reads metadata from `SKILL.md` frontmatter (`name`, `version`, etc.)
+- Reads metadata from `SKILL.md` frontmatter (`name`, `slug`, `version`, etc.)
 - Validates semver `version` locally before API submission
-- For `--github`, CLI prefetches file for quick validation before publishing
+- Validates `slug` locally (`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
+- Local publish requires login (`askill login`)
+- `--github` publish does not require login; author becomes repo owner
 | `command` | Command name (defined in SKILL.md) |
 | `args` | Arguments passed to the command |
 
@@ -465,7 +466,7 @@ askill logout
 
 ---
 
-## askill publish (Planned)
+## askill publish (Legacy Notes)
 
 Publish a skill to askill.sh.
 
@@ -489,14 +490,11 @@ askill publish [options]
 # Publish from current directory
 askill publish
 
-# Publish under organization scope
-askill publish --scope mycompany
+# Publish from local path (author = logged-in user)
+askill publish ./skills/my-skill
 
-# Publish beta version
-askill publish --tag beta
-
-# Preview without publishing
-askill publish --dry-run
+# Publish from GitHub URL (author = repo owner)
+askill publish --github https://github.com/owner/repo/blob/main/skills/my-skill/SKILL.md
 ```
 
 ---

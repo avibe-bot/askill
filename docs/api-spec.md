@@ -18,6 +18,7 @@
 - `path` - SKILL.md 文件路径 (如 "scripts/error-codes")
 
 **CLI 支持的标识格式:**
+- `@author/slug` - 发布技能 canonical slug
 - `extract-errors` - 短名称 (需全局唯一)
 - `facebook/react` - 列出仓库中所有 skills
 - `facebook/react@extract-errors` - 指定 owner/repo 和 skill 名称
@@ -132,6 +133,7 @@ GET /api/v1/skills/:slug
 
 **支持的 Slug 格式:**
 - 数字 ID: `123`
+- 发布 slug: `@author/slug` 或 `@author/slug@version`
 - 短名称: `extract-errors` (需全局唯一)
 - @ 格式: `facebook/react@extract-errors`
 - 完整路径: `facebook/react/scripts/error-codes`
@@ -166,6 +168,36 @@ GET /api/v1/skills/:slug/raw
 
 ```
 Content-Type: text/markdown; charset=utf-8
+
+---
+
+### 5. 发布 Skill
+
+```
+POST /api/v1/publish
+```
+
+**Body（两种方式二选一）:**
+
+```json
+{
+  "content": "---\nname: my-skill\nslug: my-skill\nversion: 1.0.0\n..."
+}
+```
+
+```json
+{
+  "githubUrl": "https://github.com/owner/repo/blob/main/path/to/SKILL.md"
+}
+```
+
+规则：
+
+- `content`（本地发布）需要 Bearer token，author=登录用户
+- `githubUrl`（GitHub 发布）不要求 token，author=repo owner
+- `slug` 必填且合法，canonical 结果是 `@author/slug`
+
+典型错误码：`MISSING_SLUG`, `INVALID_VERSION`, `VERSION_EXISTS`, `SLUG_CONFLICT`
 
 ---
 name: extract-errors

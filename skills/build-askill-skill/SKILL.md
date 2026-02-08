@@ -41,6 +41,7 @@ my-skill/
 ```markdown
 ---
 name: my-skill
+slug: my-skill
 description: One-line purpose of the skill
 version: 0.1.0
 ---
@@ -64,6 +65,7 @@ Required:
 Strongly recommended:
 
 - `version` - valid semver (`1.0.0`, `1.1.0-beta.1`)
+- `slug` - publish identifier (`@author/slug`)
 
 Optional:
 
@@ -127,7 +129,7 @@ When iterating quickly, reinstall with `askill add ./my-skill -y` after changes.
 
 ## Publish Workflow
 
-Publishing is token-based.
+Publishing uses `slug` as publish intent.
 
 ```bash
 askill login --token ask_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
@@ -143,10 +145,12 @@ askill publish --github https://github.com/owner/repo/blob/main/path/to/SKILL.md
 
 Important:
 
-- `askill publish` requires `name` and valid semver `version`
-- successful publish creates an author-owned slug like `@yourname/<name>`
+- `askill publish` requires `name`, `slug`, and valid semver `version`
+- local publish uses logged-in user as author
+- GitHub URL publish uses repo owner as author (supports org namespace)
+- successful publish creates canonical slug `@author/<slug>`
 - bump `version` before republishing updates
-- use `askill submit <github-url>` when you only want indexing, not account-owned publishing
+- `askill submit <github-url>` requests indexing and can trigger slug-driven publish flows
 
 ## Quality Checklist Before Release
 

@@ -53,7 +53,7 @@ function showBanner(): void {
   console.log(`  ${DIM}$${RESET} askill init${RESET}              ${DIM}Create a new skill${RESET}`);
   console.log(`  ${DIM}$${RESET} askill submit ${DIM}<url>${RESET}   ${DIM}Submit GitHub skill URL${RESET}`);
   console.log(`  ${DIM}$${RESET} askill login${RESET}             ${DIM}Login with API token${RESET}`);
-  console.log(`  ${DIM}$${RESET} askill publish${RESET}           ${DIM}Publish a skill${RESET}`);
+  console.log(`  ${DIM}$${RESET} askill publish${RESET}           ${DIM}Publish to @author/slug${RESET}`);
   console.log(`  ${DIM}$${RESET} askill run ${DIM}<skill:cmd>${RESET}  ${DIM}Run a skill command${RESET}`);
   console.log();
   console.log(`${DIM}Browse skills at${RESET} ${CYAN}https://askill.sh${RESET}`);
@@ -78,8 +78,8 @@ ${BOLD}Commands:${RESET}
   login [--token <token>]  Login with API token
   logout                   Clear saved API token
   whoami                   Show current authenticated user
-  publish [path]           Publish SKILL.md from local path
-  publish --github <url>   Publish SKILL.md from GitHub URL
+  publish [path]           Publish local SKILL.md (login required)
+  publish --github <url>   Publish GitHub SKILL.md (author=repo owner)
   run <skill:cmd>          Run a skill command
   upgrade                  Update askill CLI to latest version
 
@@ -201,7 +201,7 @@ function showCommandHelp(commandInput: string): boolean {
 
     whoami: `${BOLD}askill whoami${RESET}\n\nUsage:\n  askill whoami\n\nDescription:\n  Show current authenticated account and masked token.`,
 
-    publish: `${BOLD}askill publish${RESET}\n\nUsage:\n  askill publish [path]\n  askill publish --github <blob-url-to-SKILL.md>\n\nDescription:\n  Publish a skill under your author scope (@author/skill-name).\n\nRequirements:\n  - Logged in via askill login\n  - SKILL.md contains valid name and semver version\n\nExamples:\n  askill publish\n  askill publish ./skills/my-skill\n  askill publish --github https://github.com/owner/repo/blob/main/skills/my-skill/SKILL.md`,
+    publish: `${BOLD}askill publish${RESET}\n\nUsage:\n  askill publish [path]\n  askill publish --github <blob-url-to-SKILL.md>\n\nDescription:\n  Publish a skill to canonical slug @author/slug.\n\nRules:\n  - SKILL.md must include valid frontmatter fields: name, slug, version\n  - Local publish requires askill login token (author is your GitHub user)\n  - --github publish uses repository owner as author and does not require login\n\nExamples:\n  askill publish\n  askill publish ./skills/my-skill\n  askill publish --github https://github.com/owner/repo/blob/main/skills/my-skill/SKILL.md`,
 
     upgrade: `${BOLD}askill upgrade${RESET}\n\nUsage:\n  askill upgrade\n\nDescription:\n  Self-update askill CLI to the latest available version.`,
 
@@ -2227,12 +2227,6 @@ async function runWhoami(): Promise<void> {
 }
 
 async function runPublish(args: string[]): Promise<void> {
-  const creds = await loadCredentials();
-  if (!creds?.token) {
-    p.log.error('Not logged in. Run askill login first.');
-    process.exit(1);
-  }
-
   const githubFlagIndex = args.findIndex((a) => a === '--github');
   const githubUrl = githubFlagIndex >= 0 ? args[githubFlagIndex + 1] : undefined;
   const localPath = args.find((a) => !a.startsWith('-')) || '.';
@@ -2269,9 +2263,20 @@ async function runPublish(args: string[]): Promise<void> {
   // Local validation
   const parsed = parseSkillMd(content);
   const name = typeof parsed.frontmatter.name === 'string' ? parsed.frontmatter.name.trim() : '';
+  const slug = typeof parsed.frontmatter.slug === 'string' ? parsed.frontmatter.slug.trim() : '';
   const version = typeof parsed.frontmatter.version === 'string' ? parsed.frontmatter.version.trim() : '';
   if (!name) {
     p.log.error('SKILL.md must include frontmatter name');
+    process.exit(1);
+  }
+  if (!slug) {
+    p.log.error('SKILL.md must include frontmatter slug');
+    p.log.info('Add slug using lowercase letters, numbers, and hyphens (example: slug: my-skill)');
+    process.exit(1);
+  }
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
+    p.log.error(`Invalid slug in SKILL.md: "${slug}"`);
+    p.log.info('Expected format: lowercase letters, numbers, hyphens (example: my-skill)');
     process.exit(1);
   }
   if (!version) {
@@ -2293,8 +2298,15 @@ async function runPublish(args: string[]): Promise<void> {
   spinner.start('Publishing skill...');
 
   try {
+    const creds = githubUrl ? null : await loadCredentials();
+    if (!githubUrl && !creds?.token) {
+      spinner.stop(pc.red('Publish failed'));
+      p.log.error('Not logged in. Run askill login first for local publish.');
+      process.exit(1);
+    }
+
     const result = await api.publish({
-      token: creds.token,
+      token: creds?.token,
       githubUrl,
       content: githubUrl ? undefined : content,
     });

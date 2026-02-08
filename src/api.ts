@@ -245,12 +245,15 @@ class APIClient {
   /**
    * Publish a skill from local content or GitHub URL
    */
-  async publish(payload: { token: string; content?: string; githubUrl?: string }): Promise<PublishResponse> {
+  async publish(payload: { token?: string; content?: string; githubUrl?: string }): Promise<PublishResponse> {
+    const headers: Record<string, string> = {};
+    if (payload.token) {
+      headers.Authorization = `Bearer ${payload.token}`;
+    }
+
     return this.fetch<PublishResponse>('/publish', {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${payload.token}`,
-      },
+      headers,
       body: JSON.stringify({
         content: payload.content,
         githubUrl: payload.githubUrl,

@@ -12,6 +12,7 @@ A skill is defined by a single `SKILL.md` file that contains:
 ```markdown
 ---
 name: my-skill
+slug: my-skill
 description: What this skill does
 version: 1.0.0
 ---
@@ -41,7 +42,7 @@ my-skill/
 
 #### `name`
 
-The skill's identifier. Used as part of the slug when published.
+The skill's display identifier.
 
 ```yaml
 name: memory-manager
@@ -49,9 +50,21 @@ name: memory-manager
 
 Rules:
 - Lowercase letters, numbers, hyphens only
-- Must start with a letter
-- 2-50 characters
-- Must be unique within scope
+- 1-64 characters recommended
+
+#### `slug` (required for publish)
+
+Canonical published id under author namespace.
+
+```yaml
+slug: memory-manager
+```
+
+Rules:
+- Lowercase letters, numbers, hyphens only
+- Regex: `^[a-z0-9]+(?:-[a-z0-9]+)*$`
+- Stable across versions
+- Canonical install slug is `@author/slug`
 
 #### `description`
 
@@ -71,7 +84,7 @@ Semantic version string.
 version: 1.2.0
 ```
 
-If omitted, defaults to `0.0.0` (unversioned).
+Publishing requires a valid semver `version`.
 
 #### `author`
 
@@ -175,6 +188,7 @@ license: MIT
 ```yaml
 ---
 name: code-reviewer
+slug: code-reviewer
 description: Automated code review with AI-powered analysis
 version: 2.1.0
 author:

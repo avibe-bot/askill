@@ -12,19 +12,19 @@ askill supports two types of slugs:
 
 | Type | Format | Example | Source |
 |------|--------|---------|--------|
-| **Published** | `@scope/name` | `@anthropic/memory` | askill.sh registry |
+| **Published** | `@author/slug` | `@anthropic/memory` | askill.sh registry |
 | **Indexed** | `gh:owner/repo@name` | `gh:facebook/react@extract-errors` | GitHub (auto-indexed) |
 | **Indexed** (full path) | `gh:owner/repo/path` | `gh:facebook/react/scripts/errors` | GitHub (auto-indexed) |
 
-## Published Skills (`@scope/name`)
+## Published Skills (`@author/slug`)
 
-Published skills are explicitly uploaded to the askill.sh registry by their authors.
+Published skills are registry entries with canonical slug binding.
 
 ### Format
 
 ```
-@scope/name
-@scope/name@version
+@author/slug
+@author/slug@version
 ```
 
 Examples:
@@ -36,20 +36,20 @@ Examples:
 @mycompany/internal-skill
 ```
 
-### Scope
+### Author Namespace
 
-The scope (the part after `@` and before `/`) is your namespace:
+The author part (after `@` and before `/`) is namespace:
 
-- **Personal scope**: Your GitHub username (e.g., `@johndoe/my-skill`)
-- **Organization scope**: Your GitHub org name (e.g., `@anthropic/memory`)
+- Local publish: author is logged-in GitHub user
+- GitHub URL publish: author is repository owner (user or org)
 
-Scopes are automatically linked to your GitHub identity when you first publish.
+Published slug part is frontmatter `slug` from `SKILL.md`.
 
 ### Benefits of Publishing
 
 | Aspect | Published | Indexed |
 |--------|-----------|---------|
-| Slug length | Short (`@scope/name`) | Long (`gh:owner/repo/path`) |
+| Slug length | Short (`@author/slug`) | Long (`gh:owner/repo/path`) |
 | Discoverability | Listed on askill.sh | Must know the path |
 | Version management | Full semver support | Git-based only |
 | Stats | Downloads, stars | GitHub stars only |
@@ -84,7 +84,7 @@ gh:anthropic/claude-tools/memory/v2
 | Multiple skills with same name | `gh:owner/repo/path` | `gh:facebook/react/scripts/extract-errors` |
 | Want explicit path | `gh:owner/repo/path` | `gh:myorg/repo/skills/memory` |
 
-The askill.sh website automatically shows the shortest valid format for each skill.
+The askill.sh website shows canonical install slug for published skills (`@author/slug`) and shortest valid GitHub slug for indexed-only skills.
 
 ### Legacy Format
 
@@ -106,8 +106,8 @@ However, we recommend always using the `gh:` prefix to clearly indicate these ar
 ### Limitations
 
 - No version pinning (always latest from default branch)
-- Author cannot claim ownership
-- Cannot override with published version
+- No semver channel management
+- No canonical `@author/slug` guarantee unless published
 
 ## Resolution Rules
 
@@ -137,7 +137,7 @@ Note: For indexed skills, the `@` in `gh:owner/repo@name` is part of the skill i
 
 ## Migrating from Indexed to Published
 
-If you maintain a skill that's currently indexed (people install via `gh:`), you can publish it to claim the canonical slug:
+If you maintain an indexed skill (installed via `gh:`), add frontmatter `slug` and publish to claim canonical slug:
 
 ```bash
 # Currently installed as:
@@ -155,18 +155,16 @@ The indexed version remains available, but you can now:
 
 ## Slug Validation Rules
 
-### Scope Rules
+### Author Rules
 
 - Lowercase letters, numbers, hyphens
-- Must match your GitHub username or org
+- Must match publish source rule (local user or GitHub repo owner)
 - 2-39 characters (GitHub limit)
 
-### Name Rules
+### Slug Rules
 
 - Lowercase letters, numbers, hyphens
-- Must start with a letter
-- 2-50 characters
-- No consecutive hyphens
+- 1-100 characters
 - Cannot be a reserved word (`install`, `remove`, `list`, etc.)
 
 ### Valid Examples

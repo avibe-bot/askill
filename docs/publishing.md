@@ -1,273 +1,139 @@
 # Publishing Guide
 
-How to publish your skill to askill.sh.
+How publishing works in askill v2.
 
-## Overview
+## Core Rule
 
-Publishing makes your skill available to everyone via a short, memorable slug like `@yourname/skillname`.
+Publishing is controlled by frontmatter `slug`.
 
-## Prerequisites
+- If `SKILL.md` contains a valid `slug`, it can be published.
+- Canonical install identifier is always `@author/slug`.
 
-1. A GitHub account
-2. A valid SKILL.md file
-3. askill CLI installed
+## Required Frontmatter
 
-## Quick Start
-
-```bash
-# 1. Login with GitHub
-askill login
-
-# 2. Navigate to your skill directory
-cd my-skill/
-
-# 3. Validate your skill
-askill validate SKILL.md
-
-# 4. Publish
-askill publish
-```
-
-## Step-by-Step Guide
-
-### 1. Create Your Skill
-
-Create a directory with a SKILL.md file:
-
-```
-my-awesome-skill/
-├── SKILL.md
-└── scripts/
-    └── main.py
-```
-
-Minimal SKILL.md:
-
-```markdown
+```yaml
 ---
-name: awesome-tool
-description: An awesome tool for awesome things
+name: my-skill
+slug: my-skill
 version: 1.0.0
+description: What this skill does
 ---
-
-# Awesome Tool
-
-Instructions for using this skill...
 ```
 
-### 2. Login to askill
+Rules for `slug`:
+
+- lowercase letters, numbers, hyphens only
+- regex: `^[a-z0-9]+(?:-[a-z0-9]+)*$`
+- stable identifier for all versions
+
+## Publish Paths
+
+### 1) Local publish (author = logged-in user)
+
+Use when publishing from local files.
 
 ```bash
 askill login
-```
-
-Login uses an API token from your account page. Run `askill login`, then paste the token from `https://askill.sh/account`.
-
-```
-◆ askill login
-
-  To get your token, visit: https://askill.sh/account
-  Token: ask_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-
-  ✓ Logged in as @johndoe
-  
-  You can now publish skills under the @johndoe scope.
-```
-
-### 3. Validate Your Skill
-
-Before publishing, validate your SKILL.md:
-
-```bash
-askill validate SKILL.md
-```
-
-```
-◆ askill validate
-
-  Checking SKILL.md...
-
-  ✓ Frontmatter is valid
-  ✓ Name: awesome-tool
-  ✓ Description: An awesome tool for awesome things
-  ✓ Version: 1.0.0
-  ✓ No dependency issues
-  
-  Ready to publish!
-```
-
-### 4. Publish
-
-```bash
 askill publish
+# or
+askill publish ./path/to/skill
 ```
 
-```
-◆ askill publish
+Requires:
 
-  Publishing skill...
+- `askill login` token
+- valid `name`, `slug`, `version`
 
-  ✓ Published @johndoe/awesome-tool@1.0.0
-  
-  Published! Install with:
-    askill add @johndoe/awesome-tool
-  
-  View at: https://askill.sh/@johndoe/awesome-tool
-```
+### 2) GitHub URL publish (author = repo owner)
 
-## Publishing Updates
-
-To publish a new version:
-
-1. Update the `version` field in SKILL.md
-2. Run `askill publish`
-
-```yaml
----
-name: awesome-tool
-version: 1.1.0  # Bumped from 1.0.0
----
-```
+Use when publishing from GitHub `SKILL.md` URL.
 
 ```bash
-askill publish
+askill publish --github https://github.com/owner/repo/blob/main/path/to/SKILL.md
 ```
 
-```
-◆ askill publish
+Behavior:
 
-  Current published version: 1.0.0
-  New version: 1.1.0
-  
-  ? Publish @johndoe/awesome-tool@1.1.0? (Y/n) y
-  
-  ✓ Published @johndoe/awesome-tool@1.1.0
-```
+- no login required
+- author is derived from GitHub repo owner (user or org)
+- resulting slug is `@owner/<frontmatter.slug>`
 
-## What Gets Published
-
-When you run `askill publish`, registry stores SKILL content and metadata from frontmatter.
-
-| File/Directory | Required | Description |
-|----------------|----------|-------------|
-| `SKILL.md` | Yes | The skill definition and metadata source |
-
-For `--github` publish, registry fetches the target `SKILL.md` from the provided URL.
-
-## Version Management
-
-### Semantic Versioning
-
-We follow [semver](https://semver.org/):
-
-- `MAJOR.MINOR.PATCH`
-- `1.0.0` → `1.0.1` (patch: bug fixes)
-- `1.0.0` → `1.1.0` (minor: new features, backward compatible)
-- `1.0.0` → `2.0.0` (major: breaking changes)
-
-### Version Constraints
-
-Users can install with version constraints:
+### 3) Submit-triggered publish (index first)
 
 ```bash
-askill add @johndoe/awesome-tool@^1.0.0  # Any 1.x.x
-askill add @johndoe/awesome-tool@~1.0.0  # Any 1.0.x
-askill add @johndoe/awesome-tool@1.0.0   # Exactly 1.0.0
+askill submit https://github.com/owner/repo
 ```
 
-### Pre-release Versions
+Indexer discovers skills; entries with valid `slug` can be auto-published by registry pipeline.
 
-```yaml
-version: 2.0.0-beta.1
-```
+## Uniqueness and Conflicts
 
-Pre-release versions are not installed by default:
+`@author/slug` is globally unique within that author namespace.
+
+- same source may publish new versions
+- different source cannot take same `@author/slug`
+
+Conflict response:
+
+- error code: `SLUG_CONFLICT`
+- fix by changing frontmatter `slug` or using the original source binding
+
+## Version Rules
+
+- `version` must be valid semver
+- new publish must be greater than current latest for same `@author/slug`
+- duplicate version returns `VERSION_EXISTS`
+
+## Install After Publish
 
 ```bash
-askill add @johndoe/awesome-tool          # Gets latest stable
-askill add @johndoe/awesome-tool@beta     # Gets latest beta
-askill add @johndoe/awesome-tool@2.0.0-beta.1  # Exact pre-release
+askill add @author/slug
 ```
 
 ## Submit vs Publish
 
-- `askill submit <github-url>`: community indexing entry, no auth required.
-- `askill publish`: author-owned release under `@author/skill-name`, requires login token.
+- `askill submit <github-url>`: request indexing/discovery
+- `askill publish [path]`: publish local content (login required)
+- `askill publish --github <blob-url>`: publish from GitHub source (author=repo owner)
 
-## Publishing via CI/CD
+## Troubleshooting
 
-### GitHub Actions
+### Missing slug
+
+- error: `MISSING_SLUG`
+- add frontmatter `slug`
+
+### Invalid slug
+
+- error: invalid slug format
+- use lowercase letters, numbers, hyphens only
+
+### Version not incremented
+
+- error: `VERSION_NOT_INCREMENTED`
+- bump semver version
+
+### Slug conflict
+
+- error: `SLUG_CONFLICT`
+- slug already bound to another source under same author
+
+## CI Example
 
 ```yaml
-# .github/workflows/publish.yml
 name: Publish Skill
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [main]
+    paths:
+      - "skills/**/SKILL.md"
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          
-      - name: Install askill
+      - name: Publish from GitHub URL
         run: |
-          curl -fsSL https://askill.sh | sh
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
-        
-      - name: Publish
-        run: askill publish
-        env:
-          ASKILL_TOKEN: ${{ secrets.ASKILL_TOKEN }}
+          npx askill-cli publish --github "https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/skills/my-skill/SKILL.md"
 ```
-
-### Getting a Token
-
-```bash
-askill token create --name "GitHub Actions"
-```
-
-Add the token to your repository's secrets as `ASKILL_TOKEN`.
-
-## Troubleshooting
-
-### "Name already taken"
-
-Someone else has published a skill with that name under your scope. Choose a different name.
-
-### "Invalid scope"
-
-You can only publish under:
-- Your GitHub username
-- GitHub organizations you have write access to
-
-### "Version already exists"
-
-You cannot republish the same version. Bump the version number.
-
-### "Validation failed"
-
-Run `askill validate SKILL.md` to see detailed errors.
-
-## Best Practices
-
-1. **Start with 0.x.x** - Use `0.1.0` while developing, `1.0.0` when stable
-2. **Write good descriptions** - This is what users see in search
-3. **Include a README** - Displayed on your skill's page
-4. **Test before publishing** - Use `askill validate`
-5. **Use meaningful tags** - Helps discoverability
-6. **Document prerequisites** - What does the user need?
-
-## Next Steps
-
-- [SKILL.md Specification](./skill-spec.md) - Complete file format
-- [Slug System](./slug-system.md) - How naming works
-- [CLI Reference](./cli-reference.md) - All commands
