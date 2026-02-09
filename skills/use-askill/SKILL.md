@@ -2,7 +2,7 @@
 name: use-askill
 slug: use-askill
 description: "Use when you need new capabilities: teaches askill find/info/add/run/check/update and publish/submit workflows with agent-safe commands"
-version: 1.1.0
+version: 1.1.1
 author:
   name: askill
   github: askill
