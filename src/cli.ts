@@ -53,7 +53,7 @@ function showBanner(): void {
   console.log(`  ${DIM}$${RESET} askill init${RESET}              ${DIM}Create a new skill${RESET}`);
   console.log(`  ${DIM}$${RESET} askill submit ${DIM}<url>${RESET}   ${DIM}Submit GitHub skill URL${RESET}`);
   console.log(`  ${DIM}$${RESET} askill login${RESET}             ${DIM}Login with API token${RESET}`);
-  console.log(`  ${DIM}$${RESET} askill publish${RESET}           ${DIM}Publish to @author/slug${RESET}`);
+  console.log(`  ${DIM}$${RESET} askill publish${RESET}           ${DIM}Publish to @author/slug (run with --help)${RESET}`);
   console.log(`  ${DIM}$${RESET} askill run ${DIM}<skill:cmd>${RESET}  ${DIM}Run a skill command${RESET}`);
   console.log();
   console.log(`${DIM}Browse skills at${RESET} ${CYAN}https://askill.sh${RESET}`);
@@ -201,7 +201,7 @@ function showCommandHelp(commandInput: string): boolean {
 
     whoami: `${BOLD}askill whoami${RESET}\n\nUsage:\n  askill whoami\n\nDescription:\n  Show current authenticated account and masked token.`,
 
-    publish: `${BOLD}askill publish${RESET}\n\nUsage:\n  askill publish [path]\n  askill publish --github <blob-url-to-SKILL.md>\n\nDescription:\n  Publish a skill to canonical slug @author/slug.\n\nRules:\n  - SKILL.md must include valid frontmatter fields: name, slug, version\n  - Local publish requires askill login token (author is your GitHub user)\n  - --github publish uses repository owner as author and does not require login\n\nExamples:\n  askill publish\n  askill publish ./skills/my-skill\n  askill publish --github https://github.com/owner/repo/blob/main/skills/my-skill/SKILL.md`,
+    publish: `${BOLD}askill publish${RESET}\n\nUsage:\n  askill publish <path>\n  askill publish .\n  askill publish --github <blob-url-to-SKILL.md>\n\nDescription:\n  Publish a skill to canonical slug @author/slug.\n\nRules:\n  - SKILL.md must include valid frontmatter fields: name, slug, version\n  - Local publish requires askill login token (author is your GitHub user)\n  - --github publish uses repository owner as author and does not require login\n\nExamples:\n  askill publish .\n  askill publish ./skills/my-skill\n  askill publish --github https://github.com/owner/repo/blob/main/skills/my-skill/SKILL.md`,
 
     upgrade: `${BOLD}askill upgrade${RESET}\n\nUsage:\n  askill upgrade\n\nDescription:\n  Self-update askill CLI to the latest available version.`,
 
@@ -2229,7 +2229,28 @@ async function runWhoami(): Promise<void> {
 async function runPublish(args: string[]): Promise<void> {
   const githubFlagIndex = args.findIndex((a) => a === '--github');
   const githubUrl = githubFlagIndex >= 0 ? args[githubFlagIndex + 1] : undefined;
-  const localPath = args.find((a) => !a.startsWith('-')) || '.';
+  if (githubFlagIndex >= 0 && !githubUrl) {
+    p.log.error('Missing value for --github. Provide a GitHub blob URL to SKILL.md.');
+    showCommandHelp('publish');
+    process.exit(1);
+  }
+
+  // Positional args (excluding the --github URL value)
+  const positional = args.filter((a, idx) => {
+    if (a.startsWith('-')) return false;
+    if (githubFlagIndex >= 0 && idx === githubFlagIndex + 1) return false;
+    return true;
+  });
+
+  // Avoid surprising behavior: `askill publish` should show help,
+  // and publishing current directory should be explicit via `askill publish .`.
+  if (!githubUrl && positional.length === 0) {
+    showCommandHelp('publish');
+    console.log(`${DIM}Tip:${RESET} publish current directory with ${CYAN}askill publish .${RESET}`);
+    return;
+  }
+
+  const localPath = positional[0] ?? '.';
 
   let content = '';
   if (githubUrl) {
