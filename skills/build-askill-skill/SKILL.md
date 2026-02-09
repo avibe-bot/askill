@@ -1,5 +1,6 @@
 ---
 name: build-askill-skill
+slug: build-askill-skill
 description: "Use when creating or modifying a skill: provides askill-compliant SKILL.md rules, commands/dependencies patterns, local test loop, and publish/versioning workflow"
 version: 1.1.0
 author:
