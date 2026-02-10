@@ -4,14 +4,15 @@
 import { isAbsolute, resolve } from 'path';
 
 export interface ParsedSource {
-  type: 'github' | 'local' | 'git';
-  url: string;            // Clone URL or resolved local path
+  type: 'github' | 'local' | 'git' | 'registry';
+  url: string;            // Clone URL, resolved local path, or registry slug
   owner?: string;         // GitHub owner
   repo?: string;          // GitHub repo
   ref?: string;           // Git branch/tag
   subpath?: string;       // Subpath within repo
   skillFilter?: string;   // @skill filter (owner/repo@skill)
   localPath?: string;     // Resolved local path
+  registrySlug?: string;  // Published slug (@author/slug[@version])
 }
 
 /**
@@ -30,6 +31,16 @@ export interface ParsedSource {
  * - "/absolute/path"                      → Local directory
  */
 export function parseSource(input: string): ParsedSource {
+  // Published slug: @author/slug[@version]
+  // Must be handled before GitHub shorthand parsing.
+  if (isRegistrySlug(input)) {
+    return {
+      type: 'registry',
+      url: input,
+      registrySlug: input,
+    };
+  }
+
   // Local path: absolute, relative, or current directory
   if (isLocalPath(input)) {
     const resolvedPath = resolve(input);
@@ -116,4 +127,30 @@ function isLocalPath(input: string): boolean {
     input === '..' ||
     /^[a-zA-Z]:[/\\]/.test(input)
   );
+}
+
+function isRegistrySlug(input: string): boolean {
+  // Accept:
+  // - @author/slug
+  // - @author/slug@version (version can be semver or range like ^1.2.0)
+  // Keep validation conservative: author/slug must be URL-safe and not contain spaces.
+  // Version (if present) must not include '/'.
+  if (!input.startsWith('@')) return false;
+  if (input.startsWith('@/')) return false;
+  if (input.includes(' ')) return false;
+
+  // @author/slug or @author/slug@version
+  const match = input.match(/^@([^/]+)\/([^@/]+)(?:@([^/]+))?$/);
+  if (!match) return false;
+
+  const [, author, slug] = match;
+  if (!author || !slug) return false;
+
+  // Very light validation: disallow leading/trailing hyphens/dots and empty segments.
+  // Full validation belongs in publish/validate flows.
+  const validSeg = (s: string) => /^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/.test(s);
+  if (!validSeg(author)) return false;
+  if (!validSeg(slug)) return false;
+
+  return true;
 }

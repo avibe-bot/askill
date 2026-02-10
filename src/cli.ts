@@ -289,6 +289,31 @@ async function resolveSkills(
 }> {
   const parsed = parseSource(source);
 
+  // Published slug: resolve via registry API
+  if (parsed.type === 'registry') {
+    const slug = parsed.registrySlug || source;
+    spinner.start(`Fetching ${slug} from askill.sh...`);
+    const skill = await api.getSkill(slug);
+    const content = await api.getSkillRaw(slug);
+    const parsedContent = parseSkillMd(content);
+
+    const name = parsedContent.frontmatter.name || skill.name || 'unknown';
+    const description = parsedContent.frontmatter.description || skill.description || '';
+
+    spinner.stop(`Found: ${pc.cyan(name)}`);
+
+    return {
+      skills: [{
+        name,
+        description,
+        path: '',
+        rawContent: content,
+        frontmatter: parsedContent.frontmatter,
+      }],
+      parsed,
+    };
+  }
+
   // Local path: discover directly
   if (parsed.type === 'local') {
     spinner.start(`Scanning ${source}...`);
