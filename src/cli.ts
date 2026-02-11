@@ -1243,6 +1243,17 @@ async function runInfo(args: string[]): Promise<void> {
     spinner.stop('');
 
     const displayName = skill.name || 'unknown';
+    const version = (() => {
+      try {
+        if (!skill.rawContent) return '';
+        const parsed = parseSkillMd(skill.rawContent);
+        return typeof parsed.frontmatter.version === 'string'
+          ? parsed.frontmatter.version.trim()
+          : '';
+      } catch {
+        return '';
+      }
+    })();
     const owner = skill.owner || 'unknown';
     const repo = skill.repo || '';
 
@@ -1253,6 +1264,9 @@ async function runInfo(args: string[]): Promise<void> {
     }
     console.log();
     console.log(`  ${pc.dim('Owner:')}      ${owner}`);
+    if (version) {
+      console.log(`  ${pc.dim('Version:')}    ${version}`);
+    }
     if (repo) {
       console.log(`  ${pc.dim('Repository:')} ${owner}/${repo}`);
     }
