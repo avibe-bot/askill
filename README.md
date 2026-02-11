@@ -20,7 +20,7 @@ Every skill on [askill.sh](https://askill.sh) is automatically reviewed by AI ac
 
 | Skill Detail |
 |---|
-| ![askill registry skill detail](./docs/screenshots/registry-skill-detail.jpg) |
+| ![askill registry skill detail](./docs/screenshots/registry-skill-detail.png) |
 
 | Install and list | Search and inspect |
 |---|---|
