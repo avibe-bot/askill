@@ -1,8 +1,8 @@
 ---
-name: use-askill
-slug: use-askill
-description: "Use when you need new capabilities: teaches askill find/info/add/run/check/update and publish/submit workflows with agent-safe commands"
-version: 1.1.1
+name: discover-a-skill
+slug: discover-a-skill
+description: "Use when you need new capabilities: discover skills, inspect details, install to agents, run commands, and manage updates with askill"
+version: 1.0.0
 author:
   name: askill
   github: askill
@@ -12,7 +12,7 @@ tags:
   - workflow
 ---
 
-# Use askill
+# Discover a Skill
 
 Use this skill when you need to operate askill reliably as an AI agent: discover skills, install them, run commands, maintain updates, and troubleshoot install/runtime issues.
 

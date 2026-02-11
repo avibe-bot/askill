@@ -54,8 +54,8 @@ askill is a package manager designed for AI agents. It provides a universal way 
 1. Read [Introduction](./introduction.md) for understanding askill
 2. Study [SKILL.md Specification](./skill-spec.md) for the skill format
 3. Check official skills:
-   - [`use-askill`](../skills/use-askill/SKILL.md) - How an agent should operate askill end-to-end
-   - [`build-askill-skill`](../skills/build-askill-skill/SKILL.md) - How to author and publish askill-compatible skills
+   - [`discover-a-skill`](../skills/discover-a-skill/SKILL.md) - How an agent should discover, install, and run skills end-to-end
+   - [`build-a-skill`](../skills/build-a-skill/SKILL.md) - How to author and publish askill-compatible skills
 
 ## Key Concepts
 

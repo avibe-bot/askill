@@ -1,8 +1,8 @@
 ---
-name: build-askill-skill
-slug: build-askill-skill
-description: "Use when creating or modifying a skill: provides askill-compliant SKILL.md rules, commands/dependencies patterns, local test loop, and publish/versioning workflow"
-version: 1.1.1
+name: build-a-skill
+slug: build-a-skill
+description: "Use when creating or modifying a skill: follow SKILL.md rules, define commands and dependencies, validate locally, version correctly, and publish"
+version: 1.0.0
 author:
   name: askill
   github: askill
@@ -12,7 +12,7 @@ tags:
   - askill
 ---
 
-# Build askill Skills
+# Build a Skill
 
 Use this skill when creating or updating a skill that must work with askill CLI and registry conventions.
 
