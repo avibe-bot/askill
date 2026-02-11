@@ -2,7 +2,7 @@
 name: build-a-skill
 slug: build-a-skill
 description: "Use when creating or modifying a skill: follow SKILL.md rules, define commands and dependencies, validate locally, version correctly, and publish"
-version: 1.0.0
+version: 1.0.1
 author:
   name: askill
   github: askill

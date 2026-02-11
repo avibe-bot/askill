@@ -2,7 +2,7 @@
 name: discover-a-skill
 slug: discover-a-skill
 description: "Use when you need new capabilities: discover skills, inspect details, install to agents, run commands, and manage updates with askill"
-version: 1.0.0
+version: 1.0.1
 author:
   name: askill
   github: askill
