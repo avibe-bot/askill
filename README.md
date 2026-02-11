@@ -6,11 +6,21 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](https://nodejs.org)
 
+**Start here: [askill.sh](https://askill.sh) - discover, score, and install agent skills in one place.**
+
 askill is a universal package manager for AI agent skills. It helps agents discover, install, run, and update reusable skills across Claude Code, Codex, OpenCode, OpenClaw, Cursor, and 40+ other AI coding assistants.
 
 Every skill on [askill.sh](https://askill.sh) is automatically reviewed by AI across 5 dimensions: Safety, Clarity, Reusability, Completeness, and Actionability.
 
 ## Screenshots
+
+| askill.sh Homepage | Skill Discovery |
+|---|---|
+| ![askill registry homepage](./docs/screenshots/registry-homepage.jpg) | ![askill registry skill list](./docs/screenshots/registry-skill-list.jpg) |
+
+| Skill Detail |
+|---|
+| ![askill registry skill detail](./docs/screenshots/registry-skill-detail.jpg) |
 
 | Install and list | Search and inspect |
 |---|---|
