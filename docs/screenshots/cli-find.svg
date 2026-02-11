@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="860" viewBox="0 0 1400 860" role="img" aria-labelledby="title desc">
+  <title id="title">askill search terminal screenshot</title>
+  <desc id="desc">A stylized terminal showing askill find output.</desc>
+  <defs>
+    <linearGradient id="bg2" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0b1220"/>
+      <stop offset="100%" stop-color="#1f2937"/>
+    </linearGradient>
+  </defs>
+  <rect width="1400" height="860" rx="24" fill="url(#bg2)"/>
+  <rect x="36" y="36" width="1328" height="788" rx="16" fill="#020617" stroke="#334155"/>
+  <circle cx="72" cy="68" r="8" fill="#ef4444"/>
+  <circle cx="96" cy="68" r="8" fill="#f59e0b"/>
+  <circle cx="120" cy="68" r="8" fill="#22c55e"/>
+  <text x="156" y="74" fill="#94a3b8" font-family="SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace" font-size="20">zsh - askill find</text>
+
+  <g fill="#e2e8f0" font-family="SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace" font-size="24">
+    <text x="72" y="132">$ askill find code review</text>
+    <text x="72" y="178" fill="#93c5fd">Searching askill registry...</text>
+    <text x="72" y="224" fill="#cbd5e1">Found 3 skills:</text>
+
+    <text x="72" y="288" fill="#f8fafc">1. @agent-tools/pr-review-pro</text>
+    <text x="112" y="324" fill="#94a3b8">Score: 4.8/5  Updated: 2d ago</text>
+    <text x="112" y="360" fill="#94a3b8">Install: askill add @agent-tools/pr-review-pro</text>
+
+    <text x="72" y="426" fill="#f8fafc">2. @devflow/secure-code-audit</text>
+    <text x="112" y="462" fill="#94a3b8">Score: 4.7/5  Updated: 5d ago</text>
+    <text x="112" y="498" fill="#94a3b8">Install: askill add @devflow/secure-code-audit</text>
+
+    <text x="72" y="564" fill="#f8fafc">3. @teamx/refactor-mentor</text>
+    <text x="112" y="600" fill="#94a3b8">Score: 4.6/5  Updated: 8d ago</text>
+    <text x="112" y="636" fill="#94a3b8">Install: askill add @teamx/refactor-mentor</text>
+
+    <text x="72" y="734" fill="#22d3ee">Tip: run "askill add &lt;skill&gt; -y" in CI/agent workflows.</text>
+  </g>
+</svg>
