@@ -16,7 +16,7 @@ Every skill on [askill.sh](https://askill.sh) is automatically reviewed by AI ac
 
 | askill.sh Homepage | Skill Discovery |
 |---|---|
-| ![askill registry homepage](./docs/screenshots/registry-homepage.jpg) | ![askill registry skill list](./docs/screenshots/registry-skill-list.jpg) |
+| ![askill registry homepage](./docs/screenshots/registry-homepage.jpg) | ![askill registry discover](./docs/screenshots/registry-discover.png) |
 
 | Skill Detail |
 |---|
