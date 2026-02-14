@@ -1,6 +1,6 @@
 // askill CLI Constants and Configuration
 
-export const VERSION = '0.1.7';
+export const VERSION = '0.1.8';
 export const API_BASE_URL = 'https://askill.sh/api/v1';
 export const REGISTRY_URL = 'https://askill.sh';
 
@@ -331,16 +331,10 @@ export type AgentType = keyof typeof agents;
 export const AGENTS_DIR = '.agents';
 export const SKILLS_SUBDIR = 'skills';
 
-// List of agents by popularity/importance for default selection
+// Hot agents for default pre-selection (intersect with installed agents)
 export const POPULAR_AGENTS: AgentType[] = [
   'claude-code',
-  'cursor',
-  'windsurf',
-  'opencode',
   'codex',
-  'cline',
-  'gemini-cli',
-  'goose',
-  'amp',
-  'roo',
+  'openclaw',
+  'opencode',
 ];

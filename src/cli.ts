@@ -3,7 +3,7 @@
 // askill - Agent Skill Package Manager
 // Install AI agent skills from askill.sh
 
-import { VERSION, REGISTRY_URL, RESET, BOLD, DIM, CYAN, GREEN, YELLOW, RED, GRAY, agents, AGENTS_DIR, SKILLS_SUBDIR, type AgentType } from './constants.ts';
+import { VERSION, REGISTRY_URL, RESET, BOLD, DIM, CYAN, GREEN, YELLOW, RED, GRAY, agents, AGENTS_DIR, SKILLS_SUBDIR, POPULAR_AGENTS, type AgentType } from './constants.ts';
 import { api, APIError, type Skill, type RepoSkill } from './api.ts';
 import { installSkill, installSkillFromDir, detectInstalledAgents, listInstalledSkills, removeSkill, isSkillInstalled, sanitizeName, type InstallMode } from './installer.ts';
 import { getAvailableUpdate, selfUpdate } from './updater.ts';
@@ -587,18 +587,23 @@ async function runInstall(args: string[]): Promise<void> {
       targetAgents = installedAgents;
       p.log.info(`Installing to: ${targetAgents.map((a) => pc.cyan(agents[a].displayName)).join(', ')}`);
     } else if (options.yes) {
-      // Non-interactive mode: use preferred agents if available, otherwise all installed
+      // Non-interactive mode: use preferred agents if available,
+      // otherwise use hot agents intersected with installed agents,
+      // and finally fall back to all installed agents.
+      const popularInstalledAgents = POPULAR_AGENTS.filter((a) => installedAgents.includes(a));
       const effectiveAgents = preferredAgents
         ? preferredAgents.filter((a) => installedAgents.includes(a))
         : [];
-      targetAgents = effectiveAgents.length > 0 ? effectiveAgents : installedAgents;
+      targetAgents = effectiveAgents.length > 0
+        ? effectiveAgents
+        : (popularInstalledAgents.length > 0 ? popularInstalledAgents : installedAgents);
       p.log.info(`Installing to: ${targetAgents.map((a) => pc.cyan(agents[a].displayName)).join(', ')}`);
     } else {
       // Use preferred agents as initial selection if available,
       // filtered to only include currently installed agents
       const initialSelection = preferredAgents
         ? preferredAgents.filter((a) => installedAgents.includes(a))
-        : installedAgents;
+        : POPULAR_AGENTS.filter((a) => installedAgents.includes(a));
 
       const selected = await p.multiselect({
         message: 'Select agents to install to',
@@ -606,7 +611,7 @@ async function runInstall(args: string[]): Promise<void> {
           value: a,
           label: agents[a].displayName,
         })),
-        initialValues: initialSelection.length > 0 ? initialSelection : installedAgents,
+        initialValues: initialSelection,
       });
 
       if (p.isCancel(selected)) {

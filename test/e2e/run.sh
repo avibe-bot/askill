@@ -356,19 +356,19 @@ test_install_local() {
 
   # Use the bundled skill as local source
   local output
-  output=$(cd "$WORKSPACE" && $CLI add /app/skills/use-askill -a claude-code -y 2>&1) || true
+  output=$(cd "$WORKSPACE" && $CLI add /app/skills/discover-a-skill -a claude-code -y 2>&1) || true
 
-  assert_contains "$output" "use-askill" "installs use-askill skill"
+  assert_contains "$output" "discover-a-skill" "installs discover-a-skill skill"
 
   # Verify files were created
-  if [ -f "$WORKSPACE/.claude/skills/use-askill/SKILL.md" ]; then
-    pass "SKILL.md created in .claude/skills/use-askill/"
+  if [ -f "$WORKSPACE/.claude/skills/discover-a-skill/SKILL.md" ]; then
+    pass "SKILL.md created in .claude/skills/discover-a-skill/"
   else
     # Check if symlink target exists
-    if [ -L "$WORKSPACE/.claude/skills/use-askill" ] && [ -f "$WORKSPACE/.claude/skills/use-askill/SKILL.md" ]; then
-      pass "SKILL.md accessible via symlink in .claude/skills/use-askill/"
+    if [ -L "$WORKSPACE/.claude/skills/discover-a-skill" ] && [ -f "$WORKSPACE/.claude/skills/discover-a-skill/SKILL.md" ]; then
+      pass "SKILL.md accessible via symlink in .claude/skills/discover-a-skill/"
     else
-      fail "SKILL.md not found in .claude/skills/use-askill/"
+      fail "SKILL.md not found in .claude/skills/discover-a-skill/"
       info "Contents of .claude/skills/:"
       ls -la "$WORKSPACE/.claude/skills/" 2>/dev/null | sed 's/^/    /' || true
     fi
@@ -383,13 +383,13 @@ test_install_then_list() {
   clean_workspace
 
   # Install
-  cd "$WORKSPACE" && $CLI add /app/skills/use-askill -a claude-code -y >/dev/null 2>&1 || true
+  cd "$WORKSPACE" && $CLI add /app/skills/discover-a-skill -a claude-code -y >/dev/null 2>&1 || true
 
   # List
   local output
   output=$(cd "$WORKSPACE" && $CLI list 2>&1) || true
 
-  assert_contains "$output" "use-askill" "lists installed skill"
+  assert_contains "$output" "discover-a-skill" "lists installed skill"
 }
 
 # ════════════════════════════════════════════════════
@@ -400,20 +400,20 @@ test_install_then_remove() {
   clean_workspace
 
   # Install
-  cd "$WORKSPACE" && $CLI add /app/skills/use-askill -a claude-code -y >/dev/null 2>&1 || true
+  cd "$WORKSPACE" && $CLI add /app/skills/discover-a-skill -a claude-code -y >/dev/null 2>&1 || true
 
   # Verify installed
-  if [ ! -e "$WORKSPACE/.claude/skills/use-askill" ]; then
+  if [ ! -e "$WORKSPACE/.claude/skills/discover-a-skill" ]; then
     fail "skill not installed, cannot test removal"
     return
   fi
 
   # Remove (pipe yes for confirmation)
   local output
-  output=$(cd "$WORKSPACE" && echo "y" | $CLI remove use-askill 2>&1) || true
+  output=$(cd "$WORKSPACE" && echo "y" | $CLI remove discover-a-skill 2>&1) || true
 
   # Verify removed
-  if [ ! -e "$WORKSPACE/.claude/skills/use-askill" ]; then
+  if [ ! -e "$WORKSPACE/.claude/skills/discover-a-skill" ]; then
     pass "skill removed from .claude/skills/"
   else
     fail "skill still exists after removal"
@@ -428,13 +428,13 @@ test_install_multi_agent() {
   clean_workspace
 
   local output
-  output=$(cd "$WORKSPACE" && $CLI add /app/skills/use-askill -a claude-code cursor -y 2>&1) || true
+  output=$(cd "$WORKSPACE" && $CLI add /app/skills/discover-a-skill -a claude-code cursor -y 2>&1) || true
 
   assert_contains "$output" "2 agent" "installs to 2 agents"
 
   local found=0
-  [ -e "$WORKSPACE/.claude/skills/use-askill" ] && ((found++)) || true
-  [ -e "$WORKSPACE/.cursor/skills/use-askill" ] && ((found++)) || true
+  [ -e "$WORKSPACE/.claude/skills/discover-a-skill" ] && ((found++)) || true
+  [ -e "$WORKSPACE/.cursor/skills/discover-a-skill" ] && ((found++)) || true
 
   if [ "$found" -eq 2 ]; then
     pass "skill present in both agent directories"
@@ -451,13 +451,13 @@ test_install_global() {
   clean_workspace
 
   local output
-  output=$(cd "$WORKSPACE" && $CLI add /app/skills/use-askill -a claude-code -g -y 2>&1) || true
+  output=$(cd "$WORKSPACE" && $CLI add /app/skills/discover-a-skill -a claude-code -g -y 2>&1) || true
 
   # Global install goes to ~/.claude/skills/
-  if [ -e "/root/.claude/skills/use-askill" ]; then
+  if [ -e "/root/.claude/skills/discover-a-skill" ]; then
     pass "skill installed globally to ~/.claude/skills/"
   else
-    fail "skill not found at ~/.claude/skills/use-askill"
+    fail "skill not found at ~/.claude/skills/discover-a-skill"
     info "Contents of ~/.claude/:"
     ls -la /root/.claude/ 2>/dev/null | sed 's/^/    /' || true
   fi
@@ -471,11 +471,11 @@ test_install_copy_mode() {
   clean_workspace
 
   local output
-  output=$(cd "$WORKSPACE" && $CLI add /app/skills/use-askill -a claude-code --copy -y 2>&1) || true
+  output=$(cd "$WORKSPACE" && $CLI add /app/skills/discover-a-skill -a claude-code --copy -y 2>&1) || true
 
-  if [ -d "$WORKSPACE/.claude/skills/use-askill" ] && [ ! -L "$WORKSPACE/.claude/skills/use-askill" ]; then
+  if [ -d "$WORKSPACE/.claude/skills/discover-a-skill" ] && [ ! -L "$WORKSPACE/.claude/skills/discover-a-skill" ]; then
     pass "installed as directory (not symlink) in copy mode"
-  elif [ -L "$WORKSPACE/.claude/skills/use-askill" ]; then
+  elif [ -L "$WORKSPACE/.claude/skills/discover-a-skill" ]; then
     fail "installed as symlink, expected copy"
   else
     fail "skill not installed"
@@ -492,7 +492,7 @@ test_install_git_clone() {
   # Use a known small repo with SKILL.md files
   # This tests the full clone → discover → install flow
   local output
-  output=$(cd "$WORKSPACE" && timeout 30 $CLI add avibe-bot/askill@use-askill -a claude-code -y 2>&1) || true
+  output=$(cd "$WORKSPACE" && timeout 30 $CLI add avibe-bot/askill@discover-a-skill -a claude-code -y 2>&1) || true
 
   if output_matches "$output" "skill\|installed\|Done"; then
     pass "clone-based install completes"
@@ -529,7 +529,7 @@ test_config_persistence() {
   rm -f /root/.config/askill/config.json
 
   # First install - should save preferred agents to lock file
-  cd "$WORKSPACE" && $CLI add /app/skills/use-askill -a claude-code -y >/dev/null 2>&1 || true
+  cd "$WORKSPACE" && $CLI add /app/skills/discover-a-skill -a claude-code -y >/dev/null 2>&1 || true
 
   # Check lock file (new location for lastSelectedAgents)
   if [ -f "/root/.agents/.skill-lock.json" ]; then
@@ -614,28 +614,25 @@ test_source_parser() {
     skip "owner/repo@skill format: could not verify"
   fi
 
-  # @author/slug format should resolve via registry API (no GitHub clone)
-  output=$(cd "$WORKSPACE" && timeout 30 $CLI add @avibe-bot/use-askill --list 2>&1) || true
+  # @author/slug format should route through registry parser (no malformed GitHub clone)
+  output=$(cd "$WORKSPACE" && timeout 30 $CLI add @avibe-bot/discover-a-skill --list 2>&1) || true
   assert_not_contains "$output" "github.com/@" "@author/slug: does not attempt GitHub clone"
-  assert_contains "$output" "use-askill" "@author/slug: resolves and lists skill"
+  assert_contains "$output" "Skill not found" "@author/slug: reports not found when slug is unavailable"
 }
 
 # ════════════════════════════════════════════════════
-# Test: Install published slug (@author/slug)
+# Test: Install indexed GitHub slug (gh:owner/repo@skill)
 # ════════════════════════════════════════════════════
 test_install_published_slug() {
-  header "Install published slug (@author/slug)"
+  header "Install indexed GitHub slug (gh:owner/repo@skill)"
   clean_workspace
 
   local output
-  output=$(cd "$WORKSPACE" && timeout 30 $CLI add @avibe-bot/use-askill -a claude-code -y 2>&1) || true
-
-  # Core regression check: must never try cloning github.com/@... .git
-  assert_not_contains "$output" "github.com/@" "does not try to clone github.com/@..."
+  output=$(cd "$WORKSPACE" && timeout 30 $CLI add gh:avibe-bot/askill@discover-a-skill -a claude-code -y 2>&1) || true
 
   # Verify install actually happened
-  if [ -f "$WORKSPACE/.claude/skills/use-askill/SKILL.md" ]; then
-    pass "SKILL.md installed to .claude/skills/use-askill/"
+  if [ -f "$WORKSPACE/.claude/skills/discover-a-skill/SKILL.md" ]; then
+    pass "SKILL.md installed to .claude/skills/discover-a-skill/"
   else
     fail "SKILL.md not found after published slug install"
     echo "$output" | strip_ansi | head -10 | sed 's/^/    /'
@@ -649,17 +646,17 @@ test_symlink_mode() {
   header "Symlink mode (default)"
   clean_workspace
 
-  cd "$WORKSPACE" && $CLI add /app/skills/use-askill -a claude-code -y >/dev/null 2>&1 || true
+  cd "$WORKSPACE" && $CLI add /app/skills/discover-a-skill -a claude-code -y >/dev/null 2>&1 || true
 
-  if [ -L "$WORKSPACE/.claude/skills/use-askill" ]; then
+  if [ -L "$WORKSPACE/.claude/skills/discover-a-skill" ]; then
     pass "installed as symlink"
     # Verify canonical location
-    if [ -d "$WORKSPACE/.agents/skills/use-askill" ]; then
+    if [ -d "$WORKSPACE/.agents/skills/discover-a-skill" ]; then
       pass "canonical directory created at .agents/skills/"
     else
       fail "canonical directory not found"
     fi
-  elif [ -d "$WORKSPACE/.claude/skills/use-askill" ]; then
+  elif [ -d "$WORKSPACE/.claude/skills/discover-a-skill" ]; then
     # Symlink may have failed, copy fallback is OK
     pass "installed as directory (symlink fallback)"
   else
@@ -674,7 +671,7 @@ test_info() {
   header "Info command"
 
   local output
-  output=$(timeout 10 $CLI info @avibe-bot/use-askill 2>&1) || true
+  output=$(timeout 10 $CLI info gh:avibe-bot/askill@discover-a-skill 2>&1) || true
 
   assert_contains "$output" "Owner" "info shows Owner"
   assert_contains "$output" "Repository" "info shows Repository"
@@ -693,7 +690,7 @@ test_lock_file_install() {
   rm -f /root/.agents/.skill-lock.json
 
   # Install a skill
-  cd "$WORKSPACE" && $CLI add /app/skills/use-askill -a claude-code -y >/dev/null 2>&1 || true
+  cd "$WORKSPACE" && $CLI add /app/skills/discover-a-skill -a claude-code -y >/dev/null 2>&1 || true
 
   if [ -f "/root/.agents/.skill-lock.json" ]; then
     pass "lock file created at ~/.agents/.skill-lock.json"
@@ -704,7 +701,7 @@ test_lock_file_install() {
     # Check structure
     assert_contains "$content" '"version"' "has version field"
     assert_contains "$content" '"skills"' "has skills map"
-    assert_contains "$content" '"use-askill"' "contains installed skill name"
+    assert_contains "$content" '"discover-a-skill"' "contains installed skill name"
     assert_contains "$content" '"source"' "has source field"
     assert_contains "$content" '"sourceType"' "has sourceType field"
     assert_contains "$content" '"installedAt"' "has installedAt timestamp"
@@ -727,7 +724,7 @@ test_lock_file_remove() {
   rm -f /root/.agents/.skill-lock.json
 
   # Install
-  cd "$WORKSPACE" && $CLI add /app/skills/use-askill -a claude-code -y >/dev/null 2>&1 || true
+  cd "$WORKSPACE" && $CLI add /app/skills/discover-a-skill -a claude-code -y >/dev/null 2>&1 || true
 
   # Verify it's in lock
   if [ ! -f "/root/.agents/.skill-lock.json" ]; then
@@ -737,16 +734,16 @@ test_lock_file_remove() {
 
   local before
   before=$(cat /root/.agents/.skill-lock.json)
-  assert_contains "$before" '"use-askill"' "skill in lock before removal"
+  assert_contains "$before" '"discover-a-skill"' "skill in lock before removal"
 
   # Remove
-  cd "$WORKSPACE" && echo "y" | $CLI remove use-askill >/dev/null 2>&1 || true
+  cd "$WORKSPACE" && echo "y" | $CLI remove discover-a-skill >/dev/null 2>&1 || true
 
   # Verify skill is removed from lock but file still exists
   if [ -f "/root/.agents/.skill-lock.json" ]; then
     local after
     after=$(cat /root/.agents/.skill-lock.json)
-    if echo "$after" | grep -q '"use-askill"'; then
+    if echo "$after" | grep -q '"discover-a-skill"'; then
       fail "skill still in lock file after removal"
     else
       pass "skill removed from lock file"
@@ -767,7 +764,7 @@ test_lock_file_version() {
   rm -f /root/.agents/.skill-lock.json
 
   # Install to create lock
-  cd "$WORKSPACE" && $CLI add /app/skills/use-askill -a claude-code -y >/dev/null 2>&1 || true
+  cd "$WORKSPACE" && $CLI add /app/skills/discover-a-skill -a claude-code -y >/dev/null 2>&1 || true
 
   if [ -f "/root/.agents/.skill-lock.json" ]; then
     local content
@@ -807,7 +804,7 @@ test_check_local_source() {
   rm -f /root/.agents/.skill-lock.json
 
   # Install from local path (creates a lock entry with sourceType=local)
-  cd "$WORKSPACE" && $CLI add /app/skills/use-askill -a claude-code -y >/dev/null 2>&1 || true
+  cd "$WORKSPACE" && $CLI add /app/skills/discover-a-skill -a claude-code -y >/dev/null 2>&1 || true
 
   # Check should report as uncheckable since it's a local source
   local output
@@ -848,7 +845,7 @@ test_update_noop() {
   rm -f /root/.agents/.skill-lock.json
 
   # Install from local (can't check for updates)
-  cd "$WORKSPACE" && $CLI add /app/skills/use-askill -a claude-code -y >/dev/null 2>&1 || true
+  cd "$WORKSPACE" && $CLI add /app/skills/discover-a-skill -a claude-code -y >/dev/null 2>&1 || true
 
   local output
   output=$(cd "$WORKSPACE" && $CLI update -y 2>&1) || true
@@ -890,7 +887,7 @@ test_check_after_git_install() {
 
   # Install from GitHub - use a known small repo
   local output
-  output=$(cd "$WORKSPACE" && timeout 30 $CLI add avibe-bot/askill@use-askill -a claude-code -y 2>&1) || true
+  output=$(cd "$WORKSPACE" && timeout 30 $CLI add avibe-bot/askill@discover-a-skill -a claude-code -y 2>&1) || true
 
   # Determine success by lock file existence (output may include clone fallback warnings)
   if [ ! -f "/root/.agents/.skill-lock.json" ]; then
@@ -1130,10 +1127,10 @@ test_run_no_commands() {
   clean_workspace
 
   # Install a skill without commands
-  cd "$WORKSPACE" && $CLI add /app/skills/use-askill -a claude-code -y >/dev/null 2>&1 || true
+  cd "$WORKSPACE" && $CLI add /app/skills/discover-a-skill -a claude-code -y >/dev/null 2>&1 || true
 
   local output
-  output=$(cd "$WORKSPACE" && $CLI run use-askill:build 2>&1) || true
+  output=$(cd "$WORKSPACE" && $CLI run discover-a-skill:build 2>&1) || true
 
   assert_contains "$output" "does not define any commands" "reports no commands"
 }
@@ -1570,20 +1567,20 @@ test_remove_global() {
   clean_workspace
 
   # Install globally first
-  cd "$WORKSPACE" && $CLI add /app/skills/use-askill -a claude-code -g -y >/dev/null 2>&1 || true
+  cd "$WORKSPACE" && $CLI add /app/skills/discover-a-skill -a claude-code -g -y >/dev/null 2>&1 || true
 
   # Verify installed
-  if [ ! -e "/root/.claude/skills/use-askill" ]; then
+  if [ ! -e "/root/.claude/skills/discover-a-skill" ]; then
     fail "global skill not installed, cannot test removal"
     return
   fi
 
   # Remove globally
   local output
-  output=$(cd "$WORKSPACE" && echo "y" | $CLI remove use-askill -g 2>&1) || true
+  output=$(cd "$WORKSPACE" && echo "y" | $CLI remove discover-a-skill -g 2>&1) || true
 
   # Verify removed
-  if [ ! -e "/root/.claude/skills/use-askill" ]; then
+  if [ ! -e "/root/.claude/skills/discover-a-skill" ]; then
     pass "global skill removed"
   else
     fail "global skill still exists after removal"
@@ -1598,14 +1595,14 @@ test_list_global() {
   clean_workspace
 
   # Install one locally and one globally
-  cd "$WORKSPACE" && $CLI add /app/skills/use-askill -a claude-code -y >/dev/null 2>&1 || true
-  cd "$WORKSPACE" && $CLI add /app/skills/use-askill -a claude-code -g -y >/dev/null 2>&1 || true
+  cd "$WORKSPACE" && $CLI add /app/skills/discover-a-skill -a claude-code -y >/dev/null 2>&1 || true
+  cd "$WORKSPACE" && $CLI add /app/skills/discover-a-skill -a claude-code -g -y >/dev/null 2>&1 || true
 
   # List global only
   local output
   output=$(cd "$WORKSPACE" && $CLI list -g 2>&1) || true
 
-  assert_contains "$output" "use-askill" "lists global skill"
+  assert_contains "$output" "discover-a-skill" "lists global skill"
   assert_contains "$output" "global" "indicates global scope"
 }
 
@@ -1617,18 +1614,18 @@ test_reinstall_skill() {
   clean_workspace
 
   # Install first time
-  cd "$WORKSPACE" && $CLI add /app/skills/use-askill -a claude-code -y >/dev/null 2>&1 || true
+  cd "$WORKSPACE" && $CLI add /app/skills/discover-a-skill -a claude-code -y >/dev/null 2>&1 || true
 
   # Get modification time
   local first_time
-  first_time=$(stat -c %Y "$WORKSPACE/.agents/skills/use-askill/SKILL.md" 2>/dev/null || stat -f %m "$WORKSPACE/.agents/skills/use-askill/SKILL.md" 2>/dev/null)
+  first_time=$(stat -c %Y "$WORKSPACE/.agents/skills/discover-a-skill/SKILL.md" 2>/dev/null || stat -f %m "$WORKSPACE/.agents/skills/discover-a-skill/SKILL.md" 2>/dev/null)
 
   # Small delay
   sleep 1
 
   # Install again
   local output
-  output=$(cd "$WORKSPACE" && $CLI add /app/skills/use-askill -a claude-code -y 2>&1) || true
+  output=$(cd "$WORKSPACE" && $CLI add /app/skills/discover-a-skill -a claude-code -y 2>&1) || true
 
   # Should succeed without error
   if output_matches "$output" "error\|failed"; then
@@ -1647,20 +1644,20 @@ test_command_aliases() {
 
   # Test 'i' as alias for 'install/add'
   local output
-  output=$(cd "$WORKSPACE" && $CLI i /app/skills/use-askill -a claude-code -y 2>&1) || true
-  assert_contains "$output" "use-askill" "alias 'i' works for add"
+  output=$(cd "$WORKSPACE" && $CLI i /app/skills/discover-a-skill -a claude-code -y 2>&1) || true
+  assert_contains "$output" "discover-a-skill" "alias 'i' works for add"
 
   # Test 'ls' as alias for 'list'
   output=$(cd "$WORKSPACE" && $CLI ls 2>&1) || true
-  if output_matches "$output" "skill\|Installed\|use-askill"; then
+  if output_matches "$output" "skill\|Installed\|discover-a-skill"; then
     pass "alias 'ls' works for list"
   else
     fail "alias 'ls' failed"
   fi
 
   # Test 'rm' as alias for 'remove'
-  output=$(cd "$WORKSPACE" && echo "y" | $CLI rm use-askill 2>&1) || true
-  if [ ! -e "$WORKSPACE/.claude/skills/use-askill" ]; then
+  output=$(cd "$WORKSPACE" && echo "y" | $CLI rm discover-a-skill 2>&1) || true
+  if [ ! -e "$WORKSPACE/.claude/skills/discover-a-skill" ]; then
     pass "alias 'rm' works for remove"
   else
     fail "alias 'rm' failed"
