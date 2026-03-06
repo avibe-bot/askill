@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/avibe-bot/askill/main/docs/json-contracts/remove.response.schema.json",
+  "title": "askill remove --json response",
+  "$ref": "./askill-cli-json.schema.json#/$defs/RemoveResponse"
+}

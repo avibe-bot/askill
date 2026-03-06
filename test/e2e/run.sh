@@ -1607,6 +1607,389 @@ test_list_global() {
 }
 
 # ════════════════════════════════════════════════════
+# Test: List --json output structure
+# ════════════════════════════════════════════════════
+test_list_json_output() {
+  header "List --json output"
+  clean_workspace
+
+  cd "$WORKSPACE" && $CLI add /app/skills/discover-a-skill -a claude-code -y >/dev/null 2>&1 || true
+
+  local output
+  output=$(cd "$WORKSPACE" && $CLI list --json 2>&1) || true
+
+  if echo "$output" | node -e '
+    const fs = require("fs");
+    const data = JSON.parse(fs.readFileSync(0, "utf8"));
+    if (data.ok !== true) process.exit(1);
+    if (!Array.isArray(data.skills)) process.exit(1);
+    const skill = data.skills.find((s) => s.name === "discover-a-skill" && s.scope === "project");
+    if (!skill) process.exit(1);
+    if (!Array.isArray(skill.agents) || !skill.agents.some((agent) => agent.id === "claude-code")) process.exit(1);
+  '; then
+    pass "list --json returns expected shape"
+  else
+    fail "list --json output is invalid"
+    echo "$output" | strip_ansi | head -10 | sed 's/^/    /'
+  fi
+}
+
+# ════════════════════════════════════════════════════
+# Test: List --json scope/agent filters
+# ════════════════════════════════════════════════════
+test_list_json_filters() {
+  header "List --json filters"
+  clean_workspace
+
+  cd "$WORKSPACE" && $CLI add /app/skills/discover-a-skill -a claude-code cursor -y >/dev/null 2>&1 || true
+  cd "$WORKSPACE" && $CLI add /app/skills/build-a-skill -a claude-code -g -y >/dev/null 2>&1 || true
+
+  local output
+  output=$(cd "$WORKSPACE" && $CLI list -p -a claude-code --json 2>&1) || true
+
+  if echo "$output" | node -e '
+    const fs = require("fs");
+    const data = JSON.parse(fs.readFileSync(0, "utf8"));
+    if (data.ok !== true) process.exit(1);
+    if (!data.filters || data.filters.scope !== "project") process.exit(1);
+    if (!Array.isArray(data.filters.agents) || data.filters.agents.length !== 1) process.exit(1);
+    if (data.filters.agents[0].id !== "claude-code") process.exit(1);
+    if (!Array.isArray(data.skills) || data.skills.length === 0) process.exit(1);
+    if (!data.skills.every((skill) => skill.scope === "project")) process.exit(1);
+    if (!data.skills.every((skill) => Array.isArray(skill.agents) && skill.agents.every((agent) => agent.id === "claude-code"))) process.exit(1);
+  '; then
+    pass "list --json applies scope and agent filters"
+  else
+    fail "list --json filters returned unexpected payload"
+    echo "$output" | strip_ansi | head -10 | sed 's/^/    /'
+  fi
+}
+
+# ════════════════════════════════════════════════════
+# Test: List --json invalid option combination
+# ════════════════════════════════════════════════════
+test_list_json_invalid_options() {
+  header "List --json invalid options"
+  clean_workspace
+
+  local output
+  output=$(cd "$WORKSPACE" && $CLI list -g -p --json 2>&1) || true
+
+  if echo "$output" | node -e '
+    const fs = require("fs");
+    const data = JSON.parse(fs.readFileSync(0, "utf8"));
+    if (data.ok !== false) process.exit(1);
+    if (!data.error || data.error.code !== "INVALID_OPTIONS") process.exit(1);
+  '; then
+    pass "list --json returns structured option errors"
+  else
+    fail "list --json invalid option error format mismatch"
+    echo "$output" | strip_ansi | head -10 | sed 's/^/    /'
+  fi
+}
+
+# ════════════════════════════════════════════════════
+# Test: Remove --json with agent filter
+# ════════════════════════════════════════════════════
+test_remove_json_agent_filter() {
+  header "Remove --json agent filter"
+  clean_workspace
+
+  cd "$WORKSPACE" && $CLI add /app/skills/discover-a-skill -a claude-code cursor -y >/dev/null 2>&1 || true
+
+  local output
+  output=$(cd "$WORKSPACE" && $CLI remove discover-a-skill -a cursor --json 2>&1) || true
+
+  if echo "$output" | node -e '
+    const fs = require("fs");
+    const data = JSON.parse(fs.readFileSync(0, "utf8"));
+    if (data.ok !== true) process.exit(1);
+    if (!Array.isArray(data.removedAgents) || data.removedAgents.length !== 1) process.exit(1);
+    if (data.removedAgents[0].id !== "cursor") process.exit(1);
+    if (!Array.isArray(data.requestedAgents) || data.requestedAgents.length !== 1) process.exit(1);
+    if (data.requestedAgents[0].id !== "cursor") process.exit(1);
+    if (!Array.isArray(data.failed) || data.failed.length !== 0) process.exit(1);
+  '; then
+    pass "remove --json reports targeted agent removal"
+  else
+    fail "remove --json payload mismatch"
+    echo "$output" | strip_ansi | head -10 | sed 's/^/    /'
+  fi
+
+  if [ -e "$WORKSPACE/.claude/skills/discover-a-skill" ] && [ ! -e "$WORKSPACE/.cursor/skills/discover-a-skill" ]; then
+    pass "agent-scoped remove only affects selected agent"
+  else
+    fail "agent-scoped remove touched unexpected agent paths"
+  fi
+}
+
+# ════════════════════════════════════════════════════
+# Test: Add --json (preview + install)
+# ════════════════════════════════════════════════════
+test_add_json_preview_and_install() {
+  header "Add --json preview and install"
+  clean_workspace
+
+  local src="/tmp/test-json-add"
+  rm -rf "$src"
+  mkdir -p "$src/alpha" "$src/beta"
+
+  cat > "$src/alpha/SKILL.md" <<'SKILL'
+---
+name: json-alpha
+description: JSON alpha skill
+version: 1.0.0
+---
+# JSON Alpha
+SKILL
+
+  cat > "$src/beta/SKILL.md" <<'SKILL'
+---
+name: json-beta
+description: JSON beta skill
+version: 1.0.0
+---
+# JSON Beta
+SKILL
+
+  local preview
+  preview=$(cd "$WORKSPACE" && $CLI add "$src" --list --json 2>&1) || true
+  if echo "$preview" | node -e '
+    const fs = require("fs");
+    const data = JSON.parse(fs.readFileSync(0, "utf8"));
+    if (data.ok !== true) process.exit(1);
+    if (data.action !== "preview") process.exit(1);
+    if (!Array.isArray(data.skills) || data.skills.length !== 2) process.exit(1);
+    const names = data.skills.map((skill) => skill.name).sort();
+    if (names[0] !== "json-alpha" || names[1] !== "json-beta") process.exit(1);
+  '; then
+    pass "add --list --json returns discovered skills"
+  else
+    fail "add --list --json payload mismatch"
+    echo "$preview" | strip_ansi | head -10 | sed 's/^/    /'
+  fi
+
+  local install
+  install=$(cd "$WORKSPACE" && $CLI add "$src" --all -a claude-code -y --json 2>&1) || true
+  if echo "$install" | node -e '
+    const fs = require("fs");
+    const data = JSON.parse(fs.readFileSync(0, "utf8"));
+    if (data.ok !== true) process.exit(1);
+    if (data.action !== "install") process.exit(1);
+    if (!data.summary || typeof data.summary.successful !== "number") process.exit(1);
+    if (!Array.isArray(data.results) || data.results.length < 2) process.exit(1);
+    if (!data.results.every((result) => result.success === true)) process.exit(1);
+    const names = new Set(data.results.map((result) => result.skill));
+    if (!names.has("json-alpha") || !names.has("json-beta")) process.exit(1);
+  '; then
+    pass "add --json install reports structured success"
+  else
+    fail "add --json install payload mismatch"
+    echo "$install" | strip_ansi | head -10 | sed 's/^/    /'
+  fi
+
+  if [ -e "$WORKSPACE/.claude/skills/json-alpha" ] && [ -e "$WORKSPACE/.claude/skills/json-beta" ]; then
+    pass "add --json install writes both skills"
+  else
+    fail "add --json install did not write expected skills"
+  fi
+
+  rm -rf "$src"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Add --json invalid agent
+# ════════════════════════════════════════════════════
+test_add_json_invalid_agent() {
+  header "Add --json invalid agent"
+  clean_workspace
+
+  local output
+  local code=0
+  output=$(cd "$WORKSPACE" && $CLI add /app/skills/discover-a-skill -a not-a-real-agent -y --json 2>&1) || code=$?
+
+  if [ "$code" -eq 1 ]; then
+    pass "add --json returns non-zero on invalid agent"
+  else
+    fail "add --json should fail on invalid agent (exit=$code)"
+  fi
+
+  if echo "$output" | node -e '
+    const fs = require("fs");
+    const data = JSON.parse(fs.readFileSync(0, "utf8"));
+    if (data.ok !== false) process.exit(1);
+    if (!data.error || data.error.code !== "INVALID_AGENTS") process.exit(1);
+    if (!data.error.details || !Array.isArray(data.error.details.invalidAgents)) process.exit(1);
+    if (!data.error.details.invalidAgents.includes("not-a-real-agent")) process.exit(1);
+  '; then
+    pass "add --json reports invalid agent details"
+  else
+    fail "add --json invalid agent payload mismatch"
+    echo "$output" | strip_ansi | head -10 | sed 's/^/    /'
+  fi
+}
+
+# ════════════════════════════════════════════════════
+# Test: Add --json requires selection for multi-skill source
+# ════════════════════════════════════════════════════
+test_add_json_requires_selection() {
+  header "Add --json requires selection"
+  clean_workspace
+
+  local output
+  local code=0
+  output=$(cd "$WORKSPACE" && $CLI add /app/skills --json 2>&1) || code=$?
+
+  if [ "$code" -eq 1 ]; then
+    pass "add --json exits non-zero when selection is required"
+  else
+    fail "add --json should fail without --all/--yes on multi-skill source (exit=$code)"
+  fi
+
+  if echo "$output" | node -e '
+    const fs = require("fs");
+    const data = JSON.parse(fs.readFileSync(0, "utf8"));
+    if (data.ok !== false) process.exit(1);
+    if (!data.error || data.error.code !== "MULTIPLE_SKILLS_REQUIRE_SELECTION") process.exit(1);
+  '; then
+    pass "add --json reports selection requirement"
+  else
+    fail "add --json selection error payload mismatch"
+    echo "$output" | strip_ansi | head -10 | sed 's/^/    /'
+  fi
+}
+
+# ════════════════════════════════════════════════════
+# Test: List --json invalid agent
+# ════════════════════════════════════════════════════
+test_list_json_invalid_agent() {
+  header "List --json invalid agent"
+  clean_workspace
+
+  local output
+  local code=0
+  output=$(cd "$WORKSPACE" && $CLI list -a not-a-real-agent --json 2>&1) || code=$?
+
+  if [ "$code" -eq 1 ]; then
+    pass "list --json returns non-zero on invalid agent"
+  else
+    fail "list --json should fail on invalid agent (exit=$code)"
+  fi
+
+  if echo "$output" | node -e '
+    const fs = require("fs");
+    const data = JSON.parse(fs.readFileSync(0, "utf8"));
+    if (data.ok !== false) process.exit(1);
+    if (!data.error || data.error.code !== "INVALID_AGENTS") process.exit(1);
+    if (!data.error.details || !Array.isArray(data.error.details.invalidAgents)) process.exit(1);
+    if (!data.error.details.invalidAgents.includes("not-a-real-agent")) process.exit(1);
+  '; then
+    pass "list --json reports invalid agent details"
+  else
+    fail "list --json invalid agent payload mismatch"
+    echo "$output" | strip_ansi | head -10 | sed 's/^/    /'
+  fi
+}
+
+# ════════════════════════════════════════════════════
+# Test: Remove --json missing skill argument
+# ════════════════════════════════════════════════════
+test_remove_json_missing_skill() {
+  header "Remove --json missing skill"
+  clean_workspace
+
+  local output
+  local code=0
+  output=$(cd "$WORKSPACE" && $CLI remove --json 2>&1) || code=$?
+
+  if [ "$code" -eq 1 ]; then
+    pass "remove --json returns non-zero when skill is missing"
+  else
+    fail "remove --json should fail without skill name (exit=$code)"
+  fi
+
+  if echo "$output" | node -e '
+    const fs = require("fs");
+    const data = JSON.parse(fs.readFileSync(0, "utf8"));
+    if (data.ok !== false) process.exit(1);
+    if (!data.error || data.error.code !== "MISSING_SKILL") process.exit(1);
+  '; then
+    pass "remove --json reports missing skill error"
+  else
+    fail "remove --json missing skill payload mismatch"
+    echo "$output" | strip_ansi | head -10 | sed 's/^/    /'
+  fi
+}
+
+# ════════════════════════════════════════════════════
+# Test: Remove --json invalid agent
+# ════════════════════════════════════════════════════
+test_remove_json_invalid_agent() {
+  header "Remove --json invalid agent"
+  clean_workspace
+
+  local output
+  local code=0
+  output=$(cd "$WORKSPACE" && $CLI remove discover-a-skill -a not-a-real-agent --json 2>&1) || code=$?
+
+  if [ "$code" -eq 1 ]; then
+    pass "remove --json returns non-zero on invalid agent"
+  else
+    fail "remove --json should fail on invalid agent (exit=$code)"
+  fi
+
+  if echo "$output" | node -e '
+    const fs = require("fs");
+    const data = JSON.parse(fs.readFileSync(0, "utf8"));
+    if (data.ok !== false) process.exit(1);
+    if (!data.error || data.error.code !== "INVALID_AGENTS") process.exit(1);
+    if (!data.error.details || !Array.isArray(data.error.details.invalidAgents)) process.exit(1);
+    if (!data.error.details.invalidAgents.includes("not-a-real-agent")) process.exit(1);
+  '; then
+    pass "remove --json reports invalid agent details"
+  else
+    fail "remove --json invalid agent payload mismatch"
+    echo "$output" | strip_ansi | head -10 | sed 's/^/    /'
+  fi
+}
+
+# ════════════════════════════════════════════════════
+# Test: Find --json machine-readable output
+# ════════════════════════════════════════════════════
+test_find_json_output() {
+  header "Find --json output"
+
+  local output
+  output=$($CLI find memory --json 2>&1) || true
+
+  if echo "$output" | node -e '
+    const fs = require("fs");
+    const data = JSON.parse(fs.readFileSync(0, "utf8"));
+    if (typeof data.ok !== "boolean") process.exit(1);
+
+    if (data.ok) {
+      if (data.query !== "memory") process.exit(1);
+      if (!Array.isArray(data.skills)) process.exit(1);
+      if (typeof data.count !== "number") process.exit(1);
+      if (data.count !== data.skills.length) process.exit(1);
+      if (data.skills.length > 0) {
+        const first = data.skills[0];
+        if (typeof first.name !== "string") process.exit(1);
+        if (!Array.isArray(first.tags)) process.exit(1);
+      }
+    } else {
+      if (!data.error || typeof data.error.code !== "string") process.exit(1);
+      if (typeof data.error.message !== "string") process.exit(1);
+    }
+  '; then
+    pass "find --json always returns machine-readable payload"
+  else
+    fail "find --json payload is not parseable/valid"
+    echo "$output" | strip_ansi | head -10 | sed 's/^/    /'
+  fi
+}
+
+# ════════════════════════════════════════════════════
 # Test: Re-install same skill (should update/overwrite)
 # ════════════════════════════════════════════════════
 test_reinstall_skill() {
@@ -1765,6 +2148,17 @@ ALL_TESTS=(
   test_help_shows_upgrade
   test_remove_global
   test_list_global
+  test_list_json_output
+  test_list_json_filters
+  test_list_json_invalid_options
+  test_list_json_invalid_agent
+  test_remove_json_agent_filter
+  test_remove_json_missing_skill
+  test_remove_json_invalid_agent
+  test_add_json_preview_and_install
+  test_add_json_invalid_agent
+  test_add_json_requires_selection
+  test_find_json_output
   test_reinstall_skill
   test_command_aliases
   test_version_flags

@@ -106,6 +106,7 @@ ${BOLD}Run Options:${RESET}
 
 ${BOLD}Search Options:${RESET}
   --full-desc             Show full skill descriptions in find/search
+  --json                  Output machine-readable JSON
 
 ${BOLD}Options:${RESET}
   --help, -h            Show this help message
@@ -137,6 +138,15 @@ interface SpinnerLike {
   message: (message: string) => void;
 }
 
+interface JsonErrorPayload {
+  ok: false;
+  error: {
+    code: string;
+    message: string;
+    details?: unknown;
+  };
+}
+
 function createSpinner(plain: boolean): SpinnerLike {
   if (!plain) {
     return p.spinner() as SpinnerLike;
@@ -146,6 +156,69 @@ function createSpinner(plain: boolean): SpinnerLike {
     start: () => {},
     stop: () => {},
     message: () => {},
+  };
+}
+
+function toAgentOutput(agent: AgentType): { id: AgentType; name: string } {
+  return {
+    id: agent,
+    name: agents[agent]?.displayName || agent,
+  };
+}
+
+function printJson(payload: unknown): void {
+  console.log(JSON.stringify(payload, null, 2));
+}
+
+function printJsonError(code: string, message: string, details?: unknown): never {
+  const payload: JsonErrorPayload = {
+    ok: false,
+    error: {
+      code,
+      message,
+      details,
+    },
+  };
+  printJson(payload);
+  process.exit(1);
+}
+
+function parseAgentOptionValues(args: string[], startIndex: number): { values: string[]; nextIndex: number } {
+  const values: string[] = [];
+  let currentIndex = startIndex;
+
+  while (currentIndex < args.length && !args[currentIndex].startsWith('-')) {
+    values.push(args[currentIndex]);
+    currentIndex += 1;
+  }
+
+  return {
+    values,
+    nextIndex: currentIndex - 1,
+  };
+}
+
+function resolveValidatedAgents(agentValues: string[] | undefined): { targetAgents: AgentType[]; invalidAgents: string[] } {
+  const validAgents = Object.keys(agents) as AgentType[];
+
+  if (!agentValues || agentValues.length === 0) {
+    return {
+      targetAgents: [],
+      invalidAgents: [],
+    };
+  }
+
+  const invalidAgents = agentValues.filter((agent) => !validAgents.includes(agent as AgentType));
+  if (invalidAgents.length > 0) {
+    return {
+      targetAgents: [],
+      invalidAgents,
+    };
+  }
+
+  return {
+    targetAgents: agentValues as AgentType[],
+    invalidAgents: [],
   };
 }
 
@@ -173,13 +246,13 @@ function showCommandHelp(commandInput: string): boolean {
   const command = normalizeCommand(commandInput);
 
   const helps: Record<string, string> = {
-    add: `${BOLD}askill add${RESET}\n\nUsage:\n  askill add <source> [options]\n\nDescription:\n  Install skills from published slugs, GitHub, or local directories.\n\nSources:\n  @author/skill-name\n  gh:owner/repo@skill-name\n  gh:owner/repo/path/to/skill\n  owner/repo\n  ./local/path\n\nScope:\n  default: current project (.agents/skills/)\n  -g, --global: user-level install\n\nOptions:\n  -g, --global            Install globally\n  -a, --agent <agents...> Install to specific agents\n  -y, --yes               Skip confirmation prompts\n  --copy                  Copy files instead of symlink\n  -l, --list              Preview discovered skills only\n  --all                   Install all discovered skills\n\nExamples:\n  askill add @johndoe/awesome-tool -y\n  askill add gh:facebook/react@extract-errors\n  askill add owner/repo --all -a claude-code opencode -y\n\nGuide:\n  https://github.com/avibe-bot/askill/tree/main/skills/discover-a-skill`,
+    add: `${BOLD}askill add${RESET}\n\nUsage:\n  askill add <source> [options]\n\nDescription:\n  Install skills from published slugs, GitHub, or local directories.\n\nSources:\n  @author/skill-name\n  gh:owner/repo@skill-name\n  gh:owner/repo/path/to/skill\n  owner/repo\n  ./local/path\n\nScope:\n  default: current project (.agents/skills/)\n  -g, --global: user-level install\n\nOptions:\n  -g, --global            Install globally\n  -a, --agent <agents...> Install to specific agents\n  -y, --yes               Skip confirmation prompts\n  --copy                  Copy files instead of symlink\n  -l, --list              Preview discovered skills only\n  --all                   Install all discovered skills\n  --json                  Output machine-readable JSON\n\nExamples:\n  askill add @johndoe/awesome-tool -y\n  askill add gh:facebook/react@extract-errors\n  askill add owner/repo --all -a claude-code opencode -y\n\nGuide:\n  https://github.com/avibe-bot/askill/tree/main/skills/discover-a-skill`,
 
-    remove: `${BOLD}askill remove${RESET}\n\nUsage:\n  askill remove <skill> [options]\n\nDescription:\n  Remove an installed skill from detected agents.\n\nOptions:\n  -g, --global            Remove global installation\n\nExamples:\n  askill remove memory\n  askill remove memory -g`,
+    remove: `${BOLD}askill remove${RESET}\n\nUsage:\n  askill remove <skill> [options]\n\nDescription:\n  Remove an installed skill from detected agents.\n\nOptions:\n  -g, --global            Remove global installation\n  -a, --agent <agents...> Remove only from specific agents\n  --json                  Output machine-readable JSON\n\nExamples:\n  askill remove memory\n  askill remove memory -g\n  askill remove memory -a opencode codex --json`,
 
-    list: `${BOLD}askill list${RESET}\n\nUsage:\n  askill list [options]\n\nDescription:\n  List installed skills and where they are available.\n\nOptions:\n  -g, --global            Show global skills only\n\nExamples:\n  askill list\n  askill list -g`,
+    list: `${BOLD}askill list${RESET}\n\nUsage:\n  askill list [options]\n\nDescription:\n  List installed skills and where they are available.\n\nOptions:\n  -g, --global            Show global skills only\n  -p, --project           Show project skills only\n  -a, --agent <agents...> Filter by agent(s)\n  --json                  Output machine-readable JSON\n\nExamples:\n  askill list\n  askill list -g\n  askill list -p -a opencode --json`,
 
-    find: `${BOLD}askill find${RESET}\n\nUsage:\n  askill find [query] [options]\n\nDescription:\n  Search indexed and published skills on askill.sh.\n\nOptions:\n  --full-desc             Show full descriptions\n\nExamples:\n  askill find memory\n  askill find code review --full-desc`,
+    find: `${BOLD}askill find${RESET}\n\nUsage:\n  askill find [query] [options]\n\nDescription:\n  Search indexed and published skills on askill.sh.\n\nOptions:\n  --full-desc             Show full descriptions\n  --json                  Output machine-readable JSON\n\nExamples:\n  askill find memory\n  askill find code review --full-desc\n  askill find memory --json`,
 
     info: `${BOLD}askill info${RESET}\n\nUsage:\n  askill info <slug>\n\nDescription:\n  Show detailed metadata and installation info for one skill.\n\nExamples:\n  askill info @johndoe/awesome-tool\n  askill info gh:facebook/react@extract-errors`,
 
@@ -241,6 +314,7 @@ interface InstallOptions {
   copy?: boolean;
   list?: boolean;
   all?: boolean;
+  json?: boolean;
 }
 
 function parseInstallOptions(args: string[]): { skillName: string; options: InstallOptions } {
@@ -260,12 +334,12 @@ function parseInstallOptions(args: string[]): { skillName: string; options: Inst
       options.list = true;
     } else if (arg === '--all') {
       options.all = true;
+    } else if (arg === '--json') {
+      options.json = true;
     } else if (arg === '-a' || arg === '--agent') {
-      options.agent = [];
-      while (i + 1 < args.length && !args[i + 1].startsWith('-')) {
-        i++;
-        options.agent.push(args[i]);
-      }
+      const parsed = parseAgentOptionValues(args, i + 1);
+      options.agent = parsed.values;
+      i = parsed.nextIndex;
     } else if (!arg.startsWith('-')) {
       skillName = arg;
     }
@@ -350,6 +424,11 @@ async function resolveSkills(
           return await resolveSkillsViaApi(parsed, spinner, options);
         } catch (apiError) {
           // Both failed
+          if (options.json) {
+            const apiErrorMessage = apiError instanceof Error ? apiError.message : 'Failed';
+            throw new Error(`Could not resolve skill (clone: ${errorMsg}; api: ${apiErrorMessage})`);
+          }
+
           spinner.stop(pc.red('Failed'));
           p.log.error(`Git clone: ${errorMsg}`);
           p.log.error(`API fallback: ${apiError instanceof Error ? apiError.message : 'Failed'}`);
@@ -359,6 +438,11 @@ async function resolveSkills(
       }
 
       // Non-GitHub source, no fallback
+      if (options.json) {
+        const errorMessage = error instanceof Error ? error.message : 'Clone failed';
+        throw new Error(`Could not clone repository: ${errorMessage}`);
+      }
+
       spinner.stop(pc.red('Clone failed'));
       if (error instanceof GitCloneError) {
         p.log.error(error.message);
@@ -450,8 +534,322 @@ async function resolveSkillsViaApi(
   return { skills: results, parsed };
 }
 
+async function runInstallJson(skillName: string, options: InstallOptions): Promise<void> {
+  if (!skillName) {
+    printJsonError('MISSING_SKILL', 'Missing skill identifier');
+  }
+
+  const spinner = createSpinner(true);
+  const { skills: discoveredSkills, parsed: sourceParsed, tempDir } = await resolveSkills(skillName, spinner, options);
+
+  const cleanup = async () => {
+    if (tempDir) await cleanupTempDir(tempDir).catch(() => {});
+  };
+
+  try {
+    if (discoveredSkills.length === 0) {
+      printJson({
+        ok: true,
+        action: options.list ? 'preview' : 'install',
+        source: {
+          input: skillName,
+          type: sourceParsed.type,
+          owner: sourceParsed.owner || null,
+          repo: sourceParsed.repo || null,
+          ref: sourceParsed.ref || null,
+          subpath: sourceParsed.subpath || null,
+          skillFilter: sourceParsed.skillFilter || null,
+          url: sourceParsed.url || null,
+        },
+        skills: [],
+      });
+      return;
+    }
+
+    if (options.list) {
+      printJson({
+        ok: true,
+        action: 'preview',
+        source: {
+          input: skillName,
+          type: sourceParsed.type,
+          owner: sourceParsed.owner || null,
+          repo: sourceParsed.repo || null,
+          ref: sourceParsed.ref || null,
+          subpath: sourceParsed.subpath || null,
+          skillFilter: sourceParsed.skillFilter || null,
+          url: sourceParsed.url || null,
+        },
+        count: discoveredSkills.length,
+        skills: discoveredSkills.map((skill) => ({
+          name: skill.name,
+          description: skill.description,
+          path: skill.path || null,
+          frontmatter: skill.frontmatter,
+        })),
+      });
+      return;
+    }
+
+    let skillsToInstall: DiscoveredSkill[];
+    if (discoveredSkills.length === 1 || options.yes || options.all) {
+      skillsToInstall = discoveredSkills;
+    } else {
+      printJson({
+        ok: false,
+        error: {
+          code: 'MULTIPLE_SKILLS_REQUIRE_SELECTION',
+          message: 'Multiple skills discovered. Use --all, --yes, or a specific source like owner/repo@skill-name',
+        },
+      });
+      process.exitCode = 1;
+      return;
+    }
+
+    const { targetAgents: specifiedAgents, invalidAgents } = resolveValidatedAgents(options.agent);
+    if (invalidAgents.length > 0) {
+      printJson({
+        ok: false,
+        error: {
+          code: 'INVALID_AGENTS',
+          message: 'Invalid agents provided',
+          details: { invalidAgents },
+        },
+      });
+      process.exitCode = 1;
+      return;
+    }
+
+    let targetAgents: AgentType[];
+    const validAgents = Object.keys(agents) as AgentType[];
+
+    if (specifiedAgents.length > 0) {
+      targetAgents = specifiedAgents;
+    } else {
+      const installedAgents = await detectInstalledAgents();
+      const preferredAgents = (await getLastSelectedAgents()) || (await getPreferredAgents());
+
+      if (installedAgents.length === 0) {
+        targetAgents = validAgents.slice(0, 5) as AgentType[];
+      } else if (installedAgents.length === 1) {
+        targetAgents = installedAgents;
+      } else {
+        const popularInstalledAgents = POPULAR_AGENTS.filter((agent) => installedAgents.includes(agent));
+        const effectiveAgents = preferredAgents
+          ? preferredAgents.filter((agent) => installedAgents.includes(agent))
+          : [];
+
+        targetAgents = effectiveAgents.length > 0
+          ? effectiveAgents
+          : (popularInstalledAgents.length > 0 ? popularInstalledAgents : installedAgents);
+      }
+    }
+
+    if (targetAgents.length === 0) {
+      printJson({
+        ok: false,
+        error: {
+          code: 'NO_TARGET_AGENTS',
+          message: 'No target agents available for installation',
+        },
+      });
+      process.exitCode = 1;
+      return;
+    }
+
+    const installGlobally = options.global ?? false;
+    const installMode: InstallMode = options.copy ? 'copy' : 'symlink';
+
+    const allResults: Array<{ skill: string; agent: AgentType; success: boolean; error?: string; isDependency?: boolean }> = [];
+    const installedNames = new Set<string>();
+
+    const normalizeDepKey = (value: string) => value.replace(/^gh:/, '').toLowerCase();
+    const toApiSlug = (value: string) => value.replace(/^gh:/, '');
+
+    async function installOneSkill(skill: DiscoveredSkill, isDependency: boolean): Promise<void> {
+      for (const agent of targetAgents) {
+        let result: { success: boolean; error?: string };
+
+        if (skill.path) {
+          result = await installSkillFromDir(skill.name, skill.path, agent, {
+            global: installGlobally,
+            mode: installMode,
+          });
+        } else {
+          result = await installSkill(skill.name, skill.rawContent, agent, {
+            global: installGlobally,
+            mode: installMode,
+          });
+        }
+
+        allResults.push({
+          skill: skill.name,
+          agent,
+          success: result.success,
+          error: result.error,
+          isDependency,
+        });
+      }
+    }
+
+    async function installDependencies(skill: DiscoveredSkill): Promise<void> {
+      const dependencies = extractDependencies(skill.rawContent);
+      if (dependencies.length === 0) return;
+
+      for (const dep of dependencies) {
+        const parsedDependency = parseDependency(dep);
+        const dependencySlug = dependencyToSlug(parsedDependency);
+        const dependencyKey = normalizeDepKey(dependencySlug);
+
+        if (installedNames.has(dependencyKey)) continue;
+        installedNames.add(dependencyKey);
+
+        try {
+          const apiSlug = toApiSlug(dependencySlug);
+          const depSkill = await api.getSkill(apiSlug);
+          const depContent = await api.getSkillRaw(apiSlug);
+          const parsedContent = parseSkillMd(depContent);
+          const resolvedName = depSkill.name
+            || parsedContent.frontmatter.name
+            || parsedDependency.skill || parsedDependency.name || dep;
+          const resolvedDescription = depSkill.description
+            || parsedContent.frontmatter.description || '';
+
+          const discoveredDependency: DiscoveredSkill = {
+            name: resolvedName,
+            description: resolvedDescription,
+            path: '',
+            rawContent: depContent,
+            frontmatter: parsedContent.frontmatter,
+          };
+
+          installedNames.add(normalizeDepKey(resolvedName));
+
+          await installDependencies(discoveredDependency);
+          await installOneSkill(discoveredDependency, true);
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : 'Failed to resolve dependency';
+          for (const agent of targetAgents) {
+            allResults.push({
+              skill: `${dep} (dependency of ${skill.name})`,
+              agent,
+              success: false,
+              error: errorMessage,
+              isDependency: true,
+            });
+          }
+        }
+      }
+    }
+
+    for (const skill of skillsToInstall) {
+      const key = normalizeDepKey(skill.name);
+      if (installedNames.has(key)) continue;
+      installedNames.add(key);
+
+      await installDependencies(skill);
+      await installOneSkill(skill, false);
+    }
+
+    const successful = allResults.filter((result) => result.success);
+    const failed = allResults.filter((result) => !result.success);
+
+    if (successful.length > 0) {
+      await saveLastSelectedAgents(targetAgents);
+
+      const installedSkillNames = new Set(successful.map((result) => result.skill));
+      for (const installedSkillName of installedSkillNames) {
+        const discoveredSkill = skillsToInstall.find((skill) => skill.name === installedSkillName);
+
+        const source = sourceParsed.owner && sourceParsed.repo
+          ? `${sourceParsed.owner}/${sourceParsed.repo}`
+          : sourceParsed.localPath || sourceParsed.url || skillName;
+        const sourceType = sourceParsed.type === 'local' ? 'local' : sourceParsed.type;
+        const sourceUrl = sourceParsed.url;
+
+        let skillPath = '';
+        if (discoveredSkill?.path && tempDir) {
+          const relative = discoveredSkill.path.replace(tempDir, '').replace(/^\//, '');
+          if (relative) skillPath = relative;
+        } else if (sourceParsed.subpath) {
+          skillPath = sourceParsed.subpath;
+        }
+
+        let skillFolderHash = '';
+        if (sourceType === 'github' && sourceParsed.owner && sourceParsed.repo) {
+          try {
+            skillFolderHash = await fetchSkillFolderHash(
+              `${sourceParsed.owner}/${sourceParsed.repo}`,
+              skillPath
+            );
+          } catch {
+            // Non-critical
+          }
+        }
+
+        await addSkillToLock(installedSkillName, {
+          source,
+          sourceType,
+          sourceUrl,
+          skillPath: skillPath || undefined,
+          skillFolderHash,
+        }).catch(() => {
+          // Non-critical
+        });
+      }
+    }
+
+    const mainSkills = successful.filter((result) => !result.isDependency);
+    const dependencySkills = successful.filter((result) => result.isDependency);
+
+    printJson({
+      ok: failed.length === 0,
+      action: 'install',
+      source: {
+        input: skillName,
+        type: sourceParsed.type,
+        owner: sourceParsed.owner || null,
+        repo: sourceParsed.repo || null,
+        ref: sourceParsed.ref || null,
+        subpath: sourceParsed.subpath || null,
+        skillFilter: sourceParsed.skillFilter || null,
+        url: sourceParsed.url || null,
+      },
+      scope: installGlobally ? 'global' : 'project',
+      mode: installMode,
+      selectedAgents: targetAgents.map(toAgentOutput),
+      requestedSkills: skillsToInstall.map((skill) => ({
+        name: skill.name,
+        description: skill.description,
+      })),
+      summary: {
+        operations: allResults.length,
+        successful: successful.length,
+        failed: failed.length,
+        skills: new Set(mainSkills.map((result) => result.skill)).size,
+        dependencies: new Set(dependencySkills.map((result) => result.skill)).size,
+      },
+      results: allResults.map((result) => ({
+        skill: result.skill,
+        agent: toAgentOutput(result.agent),
+        scope: installGlobally ? 'global' : 'project',
+        success: result.success,
+        error: result.error || null,
+        isDependency: Boolean(result.isDependency),
+      })),
+    });
+  } finally {
+    await cleanup();
+  }
+}
+
 async function runInstall(args: string[]): Promise<void> {
   const { skillName, options } = parseInstallOptions(args);
+  if (options.json) {
+    await runInstallJson(skillName, options);
+    return;
+  }
+
   const plainMode = Boolean(options.yes) || !process.stdout.isTTY;
 
   if (!skillName) {
@@ -892,6 +1290,7 @@ const SEARCH_DESCRIPTION_MAX_LENGTH = 500;
 interface SearchOptions {
   fullDesc: boolean;
   query: string;
+  json: boolean;
 }
 
 interface AIScoreDimension {
@@ -1055,21 +1454,25 @@ function normalizeInfoTarget(input: string): string {
 
 function parseSearchOptions(args: string[]): SearchOptions {
   const fullDesc = args.includes('--full-desc');
-  const query = args.filter((arg) => arg !== '--full-desc').join(' ');
+  const json = args.includes('--json');
+  const query = args.filter((arg) => arg !== '--full-desc' && arg !== '--json').join(' ');
 
   return {
     fullDesc,
     query,
+    json,
   };
 }
 
 async function runSearch(args: string[]): Promise<void> {
-  const { fullDesc, query } = parseSearchOptions(args);
+  const { fullDesc, query, json } = parseSearchOptions(args);
 
-  console.log();
-  p.intro(pc.bgCyan(pc.black(' askill search ')));
+  if (!json) {
+    console.log();
+    p.intro(pc.bgCyan(pc.black(' askill search ')));
+  }
 
-  const spinner = p.spinner();
+  const spinner = createSpinner(json);
   spinner.start(query ? `Searching for "${query}"...` : 'Loading skills...');
 
   try {
@@ -1079,6 +1482,43 @@ async function runSearch(args: string[]): Promise<void> {
 
     const skills = response.data || [];
     spinner.stop(`Found ${skills.length} result(s)`);
+
+    const normalized = skills.map((skill) => {
+      const displayName = skill.name || 'unknown';
+      const owner = skill.owner || 'unknown';
+      const installSource = skill.owner && skill.repo
+        ? `gh:${skill.owner}/${skill.repo}@${displayName}`
+        : `gh:${displayName}`;
+
+      return {
+        id: skill.id,
+        name: displayName,
+        description: skill.description || '',
+        owner,
+        repo: skill.repo || null,
+        tags: skill.tags || [],
+        stars: skill.stars ?? null,
+        aiScore: getTotalAIScore(skill),
+        aiBreakdown: getAIScoreDimensions(skill).map((dimension) => ({
+          key: dimension.key,
+          label: dimension.label,
+          score: dimension.score,
+        })),
+        updatedAt: skill.updatedAt || null,
+        installSource,
+        url: skill.id ? `${REGISTRY_URL}/skills/${skill.id}` : null,
+      };
+    });
+
+    if (json) {
+      printJson({
+        ok: true,
+        query,
+        count: normalized.length,
+        skills: normalized,
+      });
+      return;
+    }
 
     if (skills.length === 0) {
       p.log.info('No skills found');
@@ -1116,7 +1556,11 @@ async function runSearch(args: string[]): Promise<void> {
 
     p.outro(`Browse more at ${pc.cyan('https://askill.sh')}`);
   } catch (error) {
-    spinner.stop(pc.red('Search failed'));
+    spinner.stop('Search failed');
+    if (json) {
+      printJsonError('SEARCH_FAILED', error instanceof Error ? error.message : 'Search failed');
+    }
+
     if (error instanceof Error) {
       console.log(pc.red(error.message));
     }
@@ -1128,26 +1572,125 @@ async function runSearch(args: string[]): Promise<void> {
 // List Command
 // ============================================
 
+interface ListOptions {
+  global: boolean;
+  project: boolean;
+  agents: string[];
+  json: boolean;
+}
+
+function parseListOptions(args: string[]): ListOptions {
+  const options: ListOptions = {
+    global: false,
+    project: false,
+    agents: [],
+    json: false,
+  };
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+
+    if (arg === '-g' || arg === '--global') {
+      options.global = true;
+      continue;
+    }
+
+    if (arg === '-p' || arg === '--project') {
+      options.project = true;
+      continue;
+    }
+
+    if (arg === '--json') {
+      options.json = true;
+      continue;
+    }
+
+    if (arg === '-a' || arg === '--agent') {
+      const parsed = parseAgentOptionValues(args, index + 1);
+      options.agents = parsed.values;
+      index = parsed.nextIndex;
+      continue;
+    }
+  }
+
+  return options;
+}
+
 async function runList(args: string[]): Promise<void> {
-  const isGlobal = args.includes('-g') || args.includes('--global');
+  const options = parseListOptions(args);
 
-  console.log();
-  p.intro(pc.bgCyan(pc.black(' askill list ')));
+  if (options.global && options.project) {
+    if (options.json) {
+      printJsonError('INVALID_OPTIONS', 'Cannot use --global and --project together');
+    }
+    console.log(`${RED}Error: Cannot use --global and --project together${RESET}`);
+    process.exit(1);
+  }
 
-  const spinner = p.spinner();
+  const { targetAgents, invalidAgents } = resolveValidatedAgents(options.agents);
+  if (invalidAgents.length > 0) {
+    if (options.json) {
+      printJsonError('INVALID_AGENTS', 'Invalid agents provided', { invalidAgents });
+    }
+    p.log.error(`Invalid agents: ${invalidAgents.join(', ')}`);
+    return;
+  }
+
+  const scopeFilter = options.global ? true : options.project ? false : undefined;
+
+  if (!options.json) {
+    console.log();
+    p.intro(pc.bgCyan(pc.black(' askill list ')));
+  }
+
+  const spinner = createSpinner(options.json);
   spinner.start('Loading installed skills...');
 
-  const skills = await listInstalledSkills({ global: isGlobal ? true : undefined });
-  spinner.stop(`Found ${skills.length} skill(s)`);
+  const skills = await listInstalledSkills({ global: scopeFilter });
 
-  if (skills.length === 0) {
+  const filteredSkills = targetAgents.length > 0
+    ? skills
+        .map((skill) => ({
+          ...skill,
+          agents: skill.agents.filter((agent) => targetAgents.includes(agent)),
+        }))
+        .filter((skill) => skill.agents.length > 0)
+    : skills;
+
+  spinner.stop(`Found ${filteredSkills.length} skill(s)`);
+
+  if (options.json) {
+    const payload = {
+      ok: true,
+      filters: {
+        scope: scopeFilter === undefined ? 'all' : scopeFilter ? 'global' : 'project',
+        agents: targetAgents.map(toAgentOutput),
+      },
+      count: filteredSkills.length,
+      summary: {
+        global: filteredSkills.filter((skill) => skill.scope === 'global').length,
+        project: filteredSkills.filter((skill) => skill.scope === 'project').length,
+      },
+      skills: filteredSkills.map((skill) => ({
+        name: skill.name,
+        scope: skill.scope,
+        path: skill.path,
+        agents: skill.agents.map(toAgentOutput),
+      })),
+    };
+
+    printJson(payload);
+    return;
+  }
+
+  if (filteredSkills.length === 0) {
     p.log.info('No skills installed');
     p.outro(`Install skills with ${pc.cyan('askill add <skill>')}`);
     return;
   }
 
   console.log();
-  for (const skill of skills) {
+  for (const skill of filteredSkills) {
     const scope = skill.scope === 'global' ? pc.yellow('[global]') : pc.dim('[project]');
     const agentList = skill.agents.map((a) => agents[a]?.displayName || a).join(', ');
 
@@ -1164,23 +1707,84 @@ async function runList(args: string[]): Promise<void> {
 // Remove Command
 // ============================================
 
+interface RemoveOptions {
+  global: boolean;
+  agents: string[];
+  json: boolean;
+  skillName: string;
+}
+
+function parseRemoveOptions(args: string[]): RemoveOptions {
+  const options: RemoveOptions = {
+    global: false,
+    agents: [],
+    json: false,
+    skillName: '',
+  };
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+
+    if (arg === '-g' || arg === '--global') {
+      options.global = true;
+      continue;
+    }
+
+    if (arg === '--json') {
+      options.json = true;
+      continue;
+    }
+
+    if (arg === '-a' || arg === '--agent') {
+      const parsed = parseAgentOptionValues(args, index + 1);
+      options.agents = parsed.values;
+      index = parsed.nextIndex;
+      continue;
+    }
+
+    if (!arg.startsWith('-') && !options.skillName) {
+      options.skillName = arg;
+    }
+  }
+
+  return options;
+}
+
 async function runRemove(args: string[]): Promise<void> {
-  const isGlobal = args.includes('-g') || args.includes('--global');
-  const skillName = args.find((a) => !a.startsWith('-'));
+  const options = parseRemoveOptions(args);
+  const { skillName } = options;
+  const isGlobal = options.global;
 
   if (!skillName) {
+    if (options.json) {
+      printJsonError('MISSING_SKILL', 'Missing skill name');
+    }
     console.log(`${RED}Error: Missing skill name${RESET}`);
     console.log(`Usage: askill remove <skill-name>`);
     process.exit(1);
   }
 
-  console.log();
-  p.intro(pc.bgCyan(pc.black(' askill remove ')));
+  const { targetAgents: scopedAgents, invalidAgents } = resolveValidatedAgents(options.agents);
+  if (invalidAgents.length > 0) {
+    if (options.json) {
+      printJsonError('INVALID_AGENTS', 'Invalid agents provided', { invalidAgents });
+    }
+    p.log.error(`Invalid agents: ${invalidAgents.join(', ')}`);
+    return;
+  }
 
-  const spinner = p.spinner();
+  if (!options.json) {
+    console.log();
+    p.intro(pc.bgCyan(pc.black(' askill remove ')));
+  }
+
+  const spinner = createSpinner(options.json);
   spinner.start('Detecting agents...');
 
-  const installedAgents = await detectInstalledAgents();
+  const installedAgents = scopedAgents.length > 0
+    ? scopedAgents
+    : await detectInstalledAgents();
+
   spinner.stop(`Found ${installedAgents.length} agent(s)`);
 
   // Find which agents have this skill
@@ -1192,34 +1796,96 @@ async function runRemove(args: string[]): Promise<void> {
   }
 
   if (agentsWithSkill.length === 0) {
+    if (options.json) {
+      printJson({
+        ok: true,
+        skill: skillName,
+        scope: isGlobal ? 'global' : 'project',
+        requestedAgents: installedAgents.map(toAgentOutput),
+        removedAgents: [],
+        skippedAgents: installedAgents.map(toAgentOutput),
+        failed: [],
+        message: `Skill "${skillName}" not found`,
+      });
+      return;
+    }
+
     p.log.info(`Skill "${skillName}" not found`);
     p.outro('');
     return;
   }
 
   // Confirm removal
-  const confirmed = await p.confirm({
-    message: `Remove ${pc.cyan(skillName)} from ${agentsWithSkill.length} agent(s)?`,
-  });
+  if (!options.json) {
+    const confirmed = await p.confirm({
+      message: `Remove ${pc.cyan(skillName)} from ${agentsWithSkill.length} agent(s)?`,
+    });
 
-  if (p.isCancel(confirmed) || !confirmed) {
-    p.cancel('Removal cancelled');
-    process.exit(0);
+    if (p.isCancel(confirmed) || !confirmed) {
+      p.cancel('Removal cancelled');
+      process.exit(0);
+    }
   }
 
   spinner.start('Removing...');
 
+  const removedAgents: AgentType[] = [];
+  const failedRemovals: Array<{ agent: AgentType; error: string }> = [];
+
   for (const agent of agentsWithSkill) {
-    await removeSkill(skillName, agent, { global: isGlobal });
+    const result = await removeSkill(skillName, agent, { global: isGlobal });
+    if (result.success) {
+      removedAgents.push(agent);
+    } else {
+      failedRemovals.push({
+        agent,
+        error: result.error || 'Unknown error',
+      });
+    }
   }
 
   // Remove from lock file
-  await removeSkillFromLock(skillName).catch(() => {
-    // Non-critical: lock file cleanup failure shouldn't fail removal
-  });
+  if (removedAgents.length > 0) {
+    await removeSkillFromLock(skillName).catch(() => {
+      // Non-critical: lock file cleanup failure shouldn't fail removal
+    });
+  }
 
   spinner.stop('Removed');
-  p.outro(pc.green(`Removed ${skillName} from ${agentsWithSkill.length} agent(s)`));
+
+  if (options.json) {
+    const skippedAgents = installedAgents.filter((agent) => !agentsWithSkill.includes(agent));
+    printJson({
+      ok: failedRemovals.length === 0,
+      skill: skillName,
+      scope: isGlobal ? 'global' : 'project',
+      requestedAgents: installedAgents.map(toAgentOutput),
+      removedAgents: removedAgents.map(toAgentOutput),
+      skippedAgents: skippedAgents.map(toAgentOutput),
+      failed: failedRemovals.map((entry) => ({
+        agent: toAgentOutput(entry.agent),
+        error: entry.error,
+      })),
+    });
+
+    if (failedRemovals.length > 0) {
+      process.exit(1);
+    }
+
+    return;
+  }
+
+  if (failedRemovals.length > 0) {
+    p.log.error(`Failed to remove from ${failedRemovals.length} agent(s)`);
+    for (const failed of failedRemovals) {
+      const agentName = agents[failed.agent]?.displayName || failed.agent;
+      console.log(`  ${pc.red('✗')} ${agentName}: ${pc.dim(failed.error)}`);
+    }
+    p.outro(pc.yellow(`Removed ${skillName} from ${removedAgents.length} agent(s), with errors`));
+    process.exit(1);
+  }
+
+  p.outro(pc.green(`Removed ${skillName} from ${removedAgents.length} agent(s)`));
 }
 
 // ============================================
@@ -2402,6 +3068,7 @@ function toRawGitHubUrl(url: string): string | null {
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
+  const jsonMode = args.includes('--json');
 
   if (args.length === 0) {
     showBanner();
@@ -2417,7 +3084,9 @@ async function main(): Promise<void> {
   }
 
   // Auto-update on startup for regular commands
-  await maybeAutoUpgradeOnStartup(command);
+  if (!jsonMode) {
+    await maybeAutoUpgradeOnStartup(command);
+  }
 
   switch (command) {
     case 'install':
@@ -2516,6 +3185,20 @@ async function main(): Promise<void> {
 }
 
 main().catch((error) => {
-  console.error(`${RED}Error: ${error.message}${RESET}`);
+  const jsonMode = process.argv.slice(2).includes('--json');
+  if (jsonMode) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    printJson({
+      ok: false,
+      error: {
+        code: 'UNHANDLED_ERROR',
+        message: errorMessage,
+      },
+    });
+    process.exit(1);
+  }
+
+  const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+  console.error(`${RED}Error: ${errorMessage}${RESET}`);
   process.exit(1);
 });

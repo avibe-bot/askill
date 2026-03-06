@@ -61,6 +61,7 @@ askill add <slug> [options]
 | `-a, --agent <agents...>` | Install to specific agents only |
 | `-y, --yes` | Skip confirmation prompts (non-interactive mode) |
 | `--copy` | Copy files instead of symlink |
+| `--json` | Output machine-readable JSON |
 
 ### Examples
 
@@ -117,7 +118,8 @@ askill remove <name> [options]
 | Option | Description |
 |--------|-------------|
 | `-g, --global` | Remove from global installation |
-| `-y, --yes` | Skip confirmation (Planned) |
+| `-a, --agent <agents...>` | Remove only from specific agents |
+| `--json` | Output machine-readable JSON |
 
 ### Examples
 
@@ -127,6 +129,9 @@ askill remove extract-errors
 
 # Remove global skill
 askill remove extract-errors -g
+
+# Remove from one agent and return JSON
+askill remove extract-errors -a opencode --json
 ```
 
 ---
@@ -146,7 +151,9 @@ askill list [options]
 | Option | Description |
 |--------|-------------|
 | `-g, --global` | List global skills only |
-| `--json` | Output as JSON (Planned) |
+| `-p, --project` | List project skills only |
+| `-a, --agent <agents...>` | Filter by specific agents |
+| `--json` | Output machine-readable JSON |
 
 ### Examples
 
@@ -156,6 +163,9 @@ askill list
 
 # List global skills
 askill list -g
+
+# List project skills for one agent in JSON
+askill list -p -a opencode --json
 ```
 
 ### Output
@@ -190,7 +200,7 @@ askill find [query] [options]
 |--------|-------------|
 | `--tag <tag>` | Filter by tag (Planned) |
 | `--limit <n>` | Number of results (default: 20) (Planned) |
-| `--json` | Output as JSON (Planned) |
+| `--json` | Output machine-readable JSON |
 
 ### Examples
 
@@ -203,6 +213,9 @@ askill find memory
 
 # Search by multiple keywords
 askill find code review
+
+# Machine-readable results for web integrations
+askill find memory --json
 
 # Filter by tag (Planned)
 askill find --tag git
@@ -585,6 +598,7 @@ These options work with all commands:
 |--------|-------------|
 | `-h, --help` | Show help |
 | `-v, --version` | Show version |
+| `--json` | Machine-readable output (supported by `add`, `find`, `list`, `remove`) |
 | `--verbose` | Verbose output (Planned) |
 | `--no-color` | Disable colored output (Planned) |
 

@@ -28,12 +28,14 @@ askill is a package manager designed for AI agents. It provides a universal way 
 |----------|-------------|
 | [Publishing Guide](./publishing.md) | How to publish skills to askill.sh |
 | [CLI Reference](./cli-reference.md) | Complete command documentation |
+| [Integrating askill CLI](./integrating-askill-cli.md) | Build Web/desktop/service products on top of `askill --json` |
 
 ### Technical Reference
 
 | Document | Description |
 |----------|-------------|
 | [API Specification](./api-spec.md) | REST API for askill.sh |
+| [JSON Contracts](./json-contracts/README.md) | JSON Schema files for validating `askill --json` outputs |
 
 ## Quick Navigation
 
@@ -42,6 +44,7 @@ askill is a package manager designed for AI agents. It provides a universal way 
 1. Start with [Getting Started](./getting-started.md)
 2. Learn about [Slug System](./slug-system.md) to understand how to reference skills
 3. Use [CLI Reference](./cli-reference.md) for command help
+4. Use [Integrating askill CLI](./integrating-askill-cli.md) when building product integrations
 
 ### For Skill Developers
 
