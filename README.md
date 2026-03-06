@@ -165,6 +165,24 @@ askill remove skill-name
 askill upgrade
 ```
 
+### Machine-readable JSON (Web/Automation)
+
+```bash
+# Search skills
+askill find memory --json
+
+# List installed skills (all/global/project + agent filter)
+askill list --json
+askill list -g --json
+askill list -p -a opencode --json
+
+# Install skill with explicit scope + agent
+askill add owner/repo@skill-name -g -a opencode -y --json
+
+# Remove skill with explicit scope + agent
+askill remove skill-name -a opencode --json
+```
+
 ### Run Skill Commands
 
 ```bash
@@ -198,6 +216,8 @@ Read the complete guide in [`docs/publishing.md`](./docs/publishing.md).
 |---|---|
 | [Getting Started](./docs/getting-started.md) | Quick start guide |
 | [CLI Reference](./docs/cli-reference.md) | Full command reference |
+| [Integrating askill CLI](./docs/integrating-askill-cli.md) | Build Web/desktop/service integrations with `askill --json` |
+| [JSON Contracts](./docs/json-contracts/README.md) | Validate `askill --json` responses with official schemas |
 | [SKILL.md Specification](./docs/skill-spec.md) | How to write high-quality skills |
 | [Publishing Guide](./docs/publishing.md) | Submit and publish workflow |
 

@@ -1,0 +1,266 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/avibe-bot/askill/main/docs/json-contracts/askill-cli-json.schema.json",
+  "title": "askill CLI JSON output schema",
+  "description": "Machine-readable output contract for askill CLI commands in --json mode (add/find/list/remove).",
+  "oneOf": [
+    { "$ref": "#/$defs/AddResponse" },
+    { "$ref": "#/$defs/FindResponse" },
+    { "$ref": "#/$defs/ListResponse" },
+    { "$ref": "#/$defs/RemoveResponse" },
+    { "$ref": "#/$defs/ErrorResponse" }
+  ],
+  "$defs": {
+    "AgentRef": {
+      "type": "object",
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" }
+      }
+    },
+    "ErrorObject": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "type": "string" },
+        "message": { "type": "string" },
+        "details": {}
+      }
+    },
+    "ErrorResponse": {
+      "type": "object",
+      "required": ["ok", "error"],
+      "properties": {
+        "ok": { "const": false },
+        "error": { "$ref": "#/$defs/ErrorObject" }
+      }
+    },
+    "SourceObject": {
+      "type": "object",
+      "required": ["input", "type", "owner", "repo", "ref", "subpath", "skillFilter", "url"],
+      "properties": {
+        "input": { "type": "string" },
+        "type": {
+          "type": "string",
+          "enum": ["github", "local", "git", "registry"]
+        },
+        "owner": { "type": ["string", "null"] },
+        "repo": { "type": ["string", "null"] },
+        "ref": { "type": ["string", "null"] },
+        "subpath": { "type": ["string", "null"] },
+        "skillFilter": { "type": ["string", "null"] },
+        "url": { "type": ["string", "null"] }
+      }
+    },
+    "AddDiscoveredSkill": {
+      "type": "object",
+      "required": ["name", "description", "path", "frontmatter"],
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "path": { "type": ["string", "null"] },
+        "frontmatter": { "type": "object" }
+      }
+    },
+    "AddRequestedSkill": {
+      "type": "object",
+      "required": ["name", "description"],
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" }
+      }
+    },
+    "AddSummary": {
+      "type": "object",
+      "required": ["operations", "successful", "failed", "skills", "dependencies"],
+      "properties": {
+        "operations": { "type": "integer", "minimum": 0 },
+        "successful": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 },
+        "skills": { "type": "integer", "minimum": 0 },
+        "dependencies": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "AddResultItem": {
+      "type": "object",
+      "required": ["skill", "agent", "scope", "success", "error", "isDependency"],
+      "properties": {
+        "skill": { "type": "string" },
+        "agent": { "$ref": "#/$defs/AgentRef" },
+        "scope": { "type": "string", "enum": ["project", "global"] },
+        "success": { "type": "boolean" },
+        "error": { "type": ["string", "null"] },
+        "isDependency": { "type": "boolean" }
+      }
+    },
+    "AddResponse": {
+      "type": "object",
+      "required": ["ok", "action", "source", "skills"],
+      "properties": {
+        "ok": { "type": "boolean" },
+        "action": { "type": "string", "enum": ["preview", "install"] },
+        "source": { "$ref": "#/$defs/SourceObject" },
+        "count": { "type": "integer", "minimum": 0 },
+        "skills": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/AddDiscoveredSkill" }
+        },
+        "scope": { "type": "string", "enum": ["project", "global"] },
+        "mode": { "type": "string", "enum": ["symlink", "copy"] },
+        "selectedAgents": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/AgentRef" }
+        },
+        "requestedSkills": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/AddRequestedSkill" }
+        },
+        "summary": { "$ref": "#/$defs/AddSummary" },
+        "results": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/AddResultItem" }
+        }
+      }
+    },
+    "FindAiBreakdownItem": {
+      "type": "object",
+      "required": ["key", "label", "score"],
+      "properties": {
+        "key": { "type": "string" },
+        "label": { "type": "string" },
+        "score": { "type": "number" }
+      }
+    },
+    "FindSkillItem": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "description",
+        "owner",
+        "repo",
+        "tags",
+        "stars",
+        "aiScore",
+        "aiBreakdown",
+        "updatedAt",
+        "installSource",
+        "url"
+      ],
+      "properties": {
+        "id": { "type": ["string", "number"] },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "owner": { "type": "string" },
+        "repo": { "type": ["string", "null"] },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "stars": { "type": ["number", "null"] },
+        "aiScore": { "type": "number" },
+        "aiBreakdown": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/FindAiBreakdownItem" }
+        },
+        "updatedAt": { "type": ["string", "null"] },
+        "installSource": { "type": "string" },
+        "url": { "type": ["string", "null"] }
+      }
+    },
+    "FindResponse": {
+      "type": "object",
+      "required": ["ok", "query", "count", "skills"],
+      "properties": {
+        "ok": { "const": true },
+        "query": { "type": "string" },
+        "count": { "type": "integer", "minimum": 0 },
+        "skills": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/FindSkillItem" }
+        }
+      }
+    },
+    "ListFilters": {
+      "type": "object",
+      "required": ["scope", "agents"],
+      "properties": {
+        "scope": { "type": "string", "enum": ["all", "project", "global"] },
+        "agents": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/AgentRef" }
+        }
+      }
+    },
+    "ListSummary": {
+      "type": "object",
+      "required": ["global", "project"],
+      "properties": {
+        "global": { "type": "integer", "minimum": 0 },
+        "project": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "ListSkillItem": {
+      "type": "object",
+      "required": ["name", "scope", "path", "agents"],
+      "properties": {
+        "name": { "type": "string" },
+        "scope": { "type": "string", "enum": ["project", "global"] },
+        "path": { "type": "string" },
+        "agents": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/AgentRef" }
+        }
+      }
+    },
+    "ListResponse": {
+      "type": "object",
+      "required": ["ok", "filters", "count", "summary", "skills"],
+      "properties": {
+        "ok": { "const": true },
+        "filters": { "$ref": "#/$defs/ListFilters" },
+        "count": { "type": "integer", "minimum": 0 },
+        "summary": { "$ref": "#/$defs/ListSummary" },
+        "skills": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ListSkillItem" }
+        }
+      }
+    },
+    "RemoveFailedItem": {
+      "type": "object",
+      "required": ["agent", "error"],
+      "properties": {
+        "agent": { "$ref": "#/$defs/AgentRef" },
+        "error": { "type": "string" }
+      }
+    },
+    "RemoveResponse": {
+      "type": "object",
+      "required": ["ok", "skill", "scope", "requestedAgents", "removedAgents", "skippedAgents", "failed"],
+      "properties": {
+        "ok": { "type": "boolean" },
+        "skill": { "type": "string" },
+        "scope": { "type": "string", "enum": ["project", "global"] },
+        "requestedAgents": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/AgentRef" }
+        },
+        "removedAgents": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/AgentRef" }
+        },
+        "skippedAgents": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/AgentRef" }
+        },
+        "failed": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/RemoveFailedItem" }
+        },
+        "message": { "type": "string" }
+      }
+    }
+  }
+}
