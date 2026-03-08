@@ -1,8 +1,11 @@
 // askill CLI Constants and Configuration
 
 export const VERSION = '0.1.9';
-export const API_BASE_URL = 'https://askill.sh/api/v1';
-export const REGISTRY_URL = 'https://askill.sh';
+const registryUrlOverride = process.env.ASKILL_REGISTRY_URL?.trim();
+const apiBaseUrlOverride = process.env.ASKILL_API_BASE_URL?.trim();
+
+export const REGISTRY_URL = registryUrlOverride || 'https://askill.sh';
+export const API_BASE_URL = apiBaseUrlOverride || `${REGISTRY_URL}/api/v1`;
 
 // ANSI Colors
 export const RESET = '\x1b[0m';
