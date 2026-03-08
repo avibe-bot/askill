@@ -85,6 +85,8 @@ ${BOLD}Commands:${RESET}
 
 ${BOLD}Skill Source Formats:${RESET}
   @author/skill-name                    Published skill from askill registry
+  col:owner/collection-handle           Shared skill collection
+  https://askill.sh/c/owner/handle      Shared collection URL
   owner/repo                          All skills from a GitHub repo
   owner/repo@skill-name               Specific skill by name
   owner/repo/path/to/skill            Specific skill by path
@@ -122,6 +124,7 @@ ${BOLD}For Agents:${RESET}
 ${BOLD}Examples:${RESET}
   ${DIM}$${RESET} askill add anthropic/courses@prompt-eng
   ${DIM}$${RESET} askill add anthropic/courses
+  ${DIM}$${RESET} askill add col:cyh/dev-tools--clx123abc -y
   ${DIM}$${RESET} askill add ./my-skills/custom-skill
   ${DIM}$${RESET} askill find memory
   ${DIM}$${RESET} askill find memory --full-desc
@@ -246,7 +249,7 @@ function showCommandHelp(commandInput: string): boolean {
   const command = normalizeCommand(commandInput);
 
   const helps: Record<string, string> = {
-    add: `${BOLD}askill add${RESET}\n\nUsage:\n  askill add <source> [options]\n\nDescription:\n  Install skills from published slugs, GitHub, or local directories.\n\nSources:\n  @author/skill-name\n  gh:owner/repo@skill-name\n  gh:owner/repo/path/to/skill\n  owner/repo\n  ./local/path\n\nScope:\n  default: current project (.agents/skills/)\n  -g, --global: user-level install\n\nOptions:\n  -g, --global            Install globally\n  -a, --agent <agents...> Install to specific agents\n  -y, --yes               Skip confirmation prompts\n  --copy                  Copy files instead of symlink\n  -l, --list              Preview discovered skills only\n  --all                   Install all discovered skills\n  --json                  Output machine-readable JSON\n\nExamples:\n  askill add @johndoe/awesome-tool -y\n  askill add gh:facebook/react@extract-errors\n  askill add owner/repo --all -a claude-code opencode -y\n\nGuide:\n  https://github.com/avibe-bot/askill/tree/main/skills/discover-a-skill`,
+    add: `${BOLD}askill add${RESET}\n\nUsage:\n  askill add <source> [options]\n\nDescription:\n  Install skills from published slugs, GitHub, local directories, or shared collections.\n\nSources:\n  @author/skill-name\n  col:owner/collection-handle\n  https://askill.sh/c/owner/handle\n  gh:owner/repo@skill-name\n  gh:owner/repo/path/to/skill\n  owner/repo\n  ./local/path\n\nScope:\n  default: current project (.agents/skills/)\n  -g, --global: user-level install\n\nOptions:\n  -g, --global            Install globally\n  -a, --agent <agents...> Install to specific agents\n  -y, --yes               Skip confirmation prompts\n  --copy                  Copy files instead of symlink\n  -l, --list              Preview discovered skills only\n  --all                   Install all discovered skills\n  --json                  Output machine-readable JSON\n\nExamples:\n  askill add @johndoe/awesome-tool -y\n  askill add col:cyh/dev-tools--clx123abc -y\n  askill add gh:facebook/react@extract-errors\n  askill add owner/repo --all -a claude-code opencode -y\n\nGuide:\n  https://github.com/avibe-bot/askill/tree/main/skills/discover-a-skill`,
 
     remove: `${BOLD}askill remove${RESET}\n\nUsage:\n  askill remove <skill> [options]\n\nDescription:\n  Remove an installed skill from detected agents.\n\nOptions:\n  -g, --global            Remove global installation\n  -a, --agent <agents...> Remove only from specific agents\n  --json                  Output machine-readable JSON\n\nExamples:\n  askill remove memory\n  askill remove memory -g\n  askill remove memory -a opencode codex --json`,
 
@@ -362,6 +365,54 @@ async function resolveSkills(
   tempDir?: string;  // Must be cleaned up after install
 }> {
   const parsed = parseSource(source);
+
+  // Shared collection: resolve all included skills via askill API
+  if (parsed.type === 'collection') {
+    const collectionOwner = parsed.collectionOwner || '';
+    const collectionHandle = parsed.collectionHandle || '';
+
+    spinner.start(`Fetching collection ${collectionOwner}/${collectionHandle}...`);
+    const collection = await api.getCollection(collectionOwner, collectionHandle);
+    spinner.message(`Resolving ${collection.skills.length} skill(s)...`);
+
+    const resolvedSkills: DiscoveredSkill[] = [];
+    const skippedRefs: string[] = [];
+    for (const item of collection.skills) {
+      try {
+        const slug = item.installRef;
+        const skill = await api.getSkill(slug);
+        const content = await api.getSkillRaw(slug);
+        const parsedContent = parseSkillMd(content);
+
+        resolvedSkills.push({
+          name: parsedContent.frontmatter.name || skill.name || item.skillName || slug,
+          description: parsedContent.frontmatter.description || skill.description || item.description || '',
+          path: '',
+          rawContent: content,
+          frontmatter: parsedContent.frontmatter,
+          sourceHint: toSkillSourceHint(slug),
+        });
+      } catch {
+        skippedRefs.push(item.installRef);
+      }
+    }
+
+    if (collection.skills.length > 0 && resolvedSkills.length === 0) {
+      throw new Error(`Collection ${collectionOwner}/${collectionHandle} does not contain any installable skills`);
+    }
+
+    spinner.stop(`Found ${resolvedSkills.length}/${collection.skills.length} skill(s) in collection`);
+    if (skippedRefs.length > 0 && !options.json) {
+      p.log.warning(`Skipped ${skippedRefs.length} collection entr${skippedRefs.length === 1 ? 'y' : 'ies'} that could not be resolved`);
+      for (const skippedRef of skippedRefs.slice(0, 5)) {
+        console.log(`  ${pc.dim('·')} ${skippedRef}`);
+      }
+      if (skippedRefs.length > 5) {
+        console.log(`  ${pc.dim(`...and ${skippedRefs.length - 5} more`)}`);
+      }
+    }
+    return { skills: resolvedSkills, parsed };
+  }
 
   // Published slug: resolve via registry API
   if (parsed.type === 'registry') {
@@ -534,6 +585,49 @@ async function resolveSkillsViaApi(
   return { skills: results, parsed };
 }
 
+function toLockSource(sourceParsed: ParsedSource, fallback: string): string {
+  if (sourceParsed.type === 'collection' && sourceParsed.collectionOwner && sourceParsed.collectionHandle) {
+    return `col:${sourceParsed.collectionOwner}/${sourceParsed.collectionHandle}`;
+  }
+
+  if (sourceParsed.owner && sourceParsed.repo) {
+    return `${sourceParsed.owner}/${sourceParsed.repo}`;
+  }
+
+  return sourceParsed.localPath || sourceParsed.url || fallback;
+}
+
+function toSkillSourceHint(input: string): DiscoveredSkill['sourceHint'] | undefined {
+  const parsed = parseSource(input);
+  const sourceType = parsed.type === 'local' ? 'local' : parsed.type;
+
+  if (parsed.type === 'collection') {
+    return {
+      source: `col:${parsed.collectionOwner}/${parsed.collectionHandle}`,
+      sourceType,
+      sourceUrl: parsed.url,
+    };
+  }
+
+  if (parsed.owner && parsed.repo) {
+    return {
+      source: `${parsed.owner}/${parsed.repo}`,
+      sourceType,
+      sourceUrl: parsed.url,
+      owner: parsed.owner,
+      repo: parsed.repo,
+      skillPath: parsed.subpath,
+    };
+  }
+
+  return {
+    source: parsed.localPath || parsed.url || input,
+    sourceType,
+    sourceUrl: parsed.url,
+    skillPath: parsed.subpath,
+  };
+}
+
 async function runInstallJson(skillName: string, options: InstallOptions): Promise<void> {
   if (!skillName) {
     printJsonError('MISSING_SKILL', 'Missing skill identifier');
@@ -559,6 +653,8 @@ async function runInstallJson(skillName: string, options: InstallOptions): Promi
           ref: sourceParsed.ref || null,
           subpath: sourceParsed.subpath || null,
           skillFilter: sourceParsed.skillFilter || null,
+          collectionOwner: sourceParsed.collectionOwner || null,
+          collectionHandle: sourceParsed.collectionHandle || null,
           url: sourceParsed.url || null,
         },
         skills: [],
@@ -578,6 +674,8 @@ async function runInstallJson(skillName: string, options: InstallOptions): Promi
           ref: sourceParsed.ref || null,
           subpath: sourceParsed.subpath || null,
           skillFilter: sourceParsed.skillFilter || null,
+          collectionOwner: sourceParsed.collectionOwner || null,
+          collectionHandle: sourceParsed.collectionHandle || null,
           url: sourceParsed.url || null,
         },
         count: discoveredSkills.length,
@@ -592,7 +690,7 @@ async function runInstallJson(skillName: string, options: InstallOptions): Promi
     }
 
     let skillsToInstall: DiscoveredSkill[];
-    if (discoveredSkills.length === 1 || options.yes || options.all) {
+    if (discoveredSkills.length === 1 || options.yes || options.all || sourceParsed.type === 'collection') {
       skillsToInstall = discoveredSkills;
     } else {
       printJson({
@@ -761,14 +859,15 @@ async function runInstallJson(skillName: string, options: InstallOptions): Promi
       for (const installedSkillName of installedSkillNames) {
         const discoveredSkill = skillsToInstall.find((skill) => skill.name === installedSkillName);
 
-        const source = sourceParsed.owner && sourceParsed.repo
-          ? `${sourceParsed.owner}/${sourceParsed.repo}`
-          : sourceParsed.localPath || sourceParsed.url || skillName;
-        const sourceType = sourceParsed.type === 'local' ? 'local' : sourceParsed.type;
-        const sourceUrl = sourceParsed.url;
+        const effectiveSource = discoveredSkill?.sourceHint;
+        const source = effectiveSource?.source || toLockSource(sourceParsed, skillName);
+        const sourceType = effectiveSource?.sourceType || (sourceParsed.type === 'local' ? 'local' : sourceParsed.type);
+        const sourceUrl = effectiveSource?.sourceUrl || sourceParsed.url;
 
         let skillPath = '';
-        if (discoveredSkill?.path && tempDir) {
+        if (effectiveSource?.skillPath) {
+          skillPath = effectiveSource.skillPath;
+        } else if (discoveredSkill?.path && tempDir) {
           const relative = discoveredSkill.path.replace(tempDir, '').replace(/^\//, '');
           if (relative) skillPath = relative;
         } else if (sourceParsed.subpath) {
@@ -776,10 +875,12 @@ async function runInstallJson(skillName: string, options: InstallOptions): Promi
         }
 
         let skillFolderHash = '';
-        if (sourceType === 'github' && sourceParsed.owner && sourceParsed.repo) {
+        const hashOwner = effectiveSource?.owner || sourceParsed.owner;
+        const hashRepo = effectiveSource?.repo || sourceParsed.repo;
+        if (sourceType === 'github' && hashOwner && hashRepo) {
           try {
             skillFolderHash = await fetchSkillFolderHash(
-              `${sourceParsed.owner}/${sourceParsed.repo}`,
+              `${hashOwner}/${hashRepo}`,
               skillPath
             );
           } catch {
@@ -813,6 +914,8 @@ async function runInstallJson(skillName: string, options: InstallOptions): Promi
         ref: sourceParsed.ref || null,
         subpath: sourceParsed.subpath || null,
         skillFilter: sourceParsed.skillFilter || null,
+        collectionOwner: sourceParsed.collectionOwner || null,
+        collectionHandle: sourceParsed.collectionHandle || null,
         url: sourceParsed.url || null,
       },
       scope: installGlobally ? 'global' : 'project',
@@ -860,7 +963,9 @@ async function runInstall(args: string[]): Promise<void> {
     console.log(`  askill add owner/repo                         ${DIM}# all skills from repo${RESET}`);
     console.log(`  askill add owner/repo@skill-name              ${DIM}# specific skill${RESET}`);
     console.log(`  askill add owner/repo/path/to/skill           ${DIM}# skill by path${RESET}`);
+    console.log(`  askill add col:owner/collection-handle        ${DIM}# shared collection${RESET}`);
     console.log(`  askill add https://github.com/owner/repo      ${DIM}# full GitHub URL${RESET}`);
+    console.log(`  askill add https://askill.sh/c/owner/handle   ${DIM}# shared collection URL${RESET}`);
     console.log(`  askill add ./local/path                       ${DIM}# local directory${RESET}`);
     process.exit(1);
   }
@@ -908,9 +1013,9 @@ async function runInstall(args: string[]): Promise<void> {
       console.log();
     }
     if (plainMode) {
-      console.log(`Install with: ${pc.cyan(`askill add ${skillName} --all`)}`);
+      console.log(`Install with: ${pc.cyan(sourceParsed.type === 'collection' ? `askill add ${skillName} -y` : `askill add ${skillName} --all`)}`);
     } else {
-      p.outro(`Install with: ${pc.cyan(`askill add ${skillName} --all`)}`);
+      p.outro(`Install with: ${pc.cyan(sourceParsed.type === 'collection' ? `askill add ${skillName} -y` : `askill add ${skillName} --all`)}`);
     }
     return;
   }
@@ -918,7 +1023,7 @@ async function runInstall(args: string[]): Promise<void> {
   // Step 2: Let user select skills (if multiple)
   let skillsToInstall: DiscoveredSkill[];
 
-  if (discoveredSkills.length === 1 || options.yes || options.all) {
+  if (discoveredSkills.length === 1 || options.yes || options.all || sourceParsed.type === 'collection') {
     skillsToInstall = discoveredSkills;
     if (discoveredSkills.length === 1) {
       p.log.info(`Installing: ${pc.cyan(discoveredSkills[0].name)}`);
@@ -1186,15 +1291,16 @@ async function runInstall(args: string[]): Promise<void> {
       const discoveredSkill = skillsToInstall.find((s) => s.name === skillName);
 
       // Determine source info from parsed source
-      const source = sourceParsed.owner && sourceParsed.repo
-        ? `${sourceParsed.owner}/${sourceParsed.repo}`
-        : sourceParsed.localPath || sourceParsed.url;
-      const sourceType = sourceParsed.type === 'local' ? 'local' : sourceParsed.type;
-      const sourceUrl = sourceParsed.url;
+      const effectiveSource = discoveredSkill?.sourceHint;
+      const source = effectiveSource?.source || toLockSource(sourceParsed, skillName);
+      const sourceType = effectiveSource?.sourceType || (sourceParsed.type === 'local' ? 'local' : sourceParsed.type);
+      const sourceUrl = effectiveSource?.sourceUrl || sourceParsed.url;
 
       // Determine skillPath: subpath within the repo
       let skillPath = '';
-      if (discoveredSkill?.path && tempDir) {
+      if (effectiveSource?.skillPath) {
+        skillPath = effectiveSource.skillPath;
+      } else if (discoveredSkill?.path && tempDir) {
         // Relative path within cloned repo
         const relative = discoveredSkill.path.replace(tempDir, '').replace(/^\//, '');
         if (relative) skillPath = relative;
@@ -1206,10 +1312,12 @@ async function runInstall(args: string[]): Promise<void> {
 
       // Fetch folder hash for GitHub sources (non-blocking, don't fail install)
       let skillFolderHash = '';
-      if (sourceType === 'github' && sourceParsed.owner && sourceParsed.repo) {
+      const hashOwner = effectiveSource?.owner || sourceParsed.owner;
+      const hashRepo = effectiveSource?.repo || sourceParsed.repo;
+      if (sourceType === 'github' && hashOwner && hashRepo) {
         try {
           skillFolderHash = await fetchSkillFolderHash(
-            `${sourceParsed.owner}/${sourceParsed.repo}`,
+            `${hashOwner}/${hashRepo}`,
             skillPath
           );
         } catch {
@@ -2023,7 +2131,12 @@ async function runCheck(_args: string[]): Promise<void> {
   for (const [name, entry] of Object.entries(skills)) {
     // Only GitHub sources can be checked via Tree SHA
     if (entry.sourceType !== 'github' || !entry.source) {
-      uncheckable.push({ name, reason: entry.sourceType === 'local' ? 'local source' : 'no source info' });
+      const reason = entry.sourceType === 'local'
+        ? 'local source'
+        : entry.sourceType === 'collection'
+          ? 'installed from shared collection (reinstall collection to refresh)'
+          : 'source type not auto-checkable';
+      uncheckable.push({ name, reason });
       continue;
     }
 
