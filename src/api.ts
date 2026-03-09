@@ -101,6 +101,28 @@ export interface AuthMeResponse {
   image: string | null;
 }
 
+export interface CollectionSkill {
+  id: number;
+  skillName: string | null;
+  description: string | null;
+  repoOwner: string | null;
+  repoName: string | null;
+  filePath: string | null;
+  tags: string[];
+  installRef: string;
+}
+
+export interface CollectionResponse {
+  owner: string;
+  handle: string;
+  name: string;
+  description: string | null;
+  count: number;
+  installCommand: string;
+  url: string;
+  skills: CollectionSkill[];
+}
+
 export interface PublishResponse {
   id: number;
   slug: string;
@@ -205,6 +227,13 @@ class APIClient {
     }
 
     return response.text();
+  }
+
+  /**
+   * Get a shared skill collection by owner and handle
+   */
+  async getCollection(owner: string, handle: string): Promise<CollectionResponse> {
+    return this.fetch<CollectionResponse>(`/collections/${encodeURIComponent(owner)}/${encodeURIComponent(handle)}`);
   }
 
   /**

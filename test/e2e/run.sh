@@ -23,6 +23,8 @@ ERRORS=()
 # ── CLI path ────────────────────────────────────────
 CLI="node /app/dist/cli.mjs"
 WORKSPACE="/workspace"
+MOCK_REGISTRY_PORT="4010"
+MOCK_REGISTRY_PID=""
 
 # Read version from /app/package.json so tests don't hardcode it
 cli_version() {
@@ -94,6 +96,42 @@ clean_workspace() {
   rm -rf /root/.askill
   mkdir -p "$WORKSPACE"
 }
+
+stop_mock_registry() {
+  if [ -n "${MOCK_REGISTRY_PID:-}" ] && kill -0 "$MOCK_REGISTRY_PID" 2>/dev/null; then
+    kill "$MOCK_REGISTRY_PID" 2>/dev/null || true
+    wait "$MOCK_REGISTRY_PID" 2>/dev/null || true
+  fi
+  MOCK_REGISTRY_PID=""
+}
+
+start_mock_registry() {
+  stop_mock_registry
+
+  MOCK_REGISTRY_PORT="4010"
+  MOCK_REGISTRY_PORT="$MOCK_REGISTRY_PORT" node /app/test/e2e/mock-registry.mjs >/tmp/askill-mock-registry.log 2>&1 &
+  MOCK_REGISTRY_PID=$!
+
+  local ready=0
+  for _ in $(seq 1 30); do
+    if node -e "fetch('http://127.0.0.1:${MOCK_REGISTRY_PORT}/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"; then
+      ready=1
+      break
+    fi
+    sleep 0.2
+  done
+
+  if [ "$ready" -ne 1 ]; then
+    fail "mock registry failed to start"
+    if [ -f /tmp/askill-mock-registry.log ]; then
+      sed 's/^/    /' /tmp/askill-mock-registry.log || true
+    fi
+    stop_mock_registry
+    return 1
+  fi
+}
+
+trap stop_mock_registry EXIT
 
 
 # ════════════════════════════════════════════════════
@@ -618,6 +656,114 @@ test_source_parser() {
   output=$(cd "$WORKSPACE" && timeout 30 $CLI add @avibe-bot/discover-a-skill --list 2>&1) || true
   assert_not_contains "$output" "github.com/@" "@author/slug: does not attempt GitHub clone"
   assert_contains "$output" "Skill not found" "@author/slug: reports not found when slug is unavailable"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Collection source in help
+# ════════════════════════════════════════════════════
+test_help_collection_sources() {
+  header "Help shows collection sources"
+
+  local output
+  output=$($CLI --help 2>&1) || true
+
+  assert_contains "$output" "col:owner/collection-handle" "help shows collection shorthand"
+  assert_contains "$output" "https://askill.sh/c/owner/handle" "help shows collection URL"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Install from shared collection source
+# ════════════════════════════════════════════════════
+test_install_collection_source() {
+  header "Install from shared collection source"
+  clean_workspace
+
+  start_mock_registry || return
+
+  local output
+  output=$(cd "$WORKSPACE" && ASKILL_REGISTRY_URL="http://127.0.0.1:${MOCK_REGISTRY_PORT}" ASKILL_API_BASE_URL="http://127.0.0.1:${MOCK_REGISTRY_PORT}/api/v1" $CLI add col:mock/dev-tools--grp123 -a claude-code -y 2>&1) || true
+
+  assert_contains "$output" "Skipped 1 collection entry" "collection reports skipped entries"
+  assert_contains "$output" "alpha-collection-skill" "installs alpha collection skill"
+  assert_contains "$output" "beta-collection-skill" "installs beta collection skill"
+
+  if [ -e "$WORKSPACE/.claude/skills/alpha-collection-skill" ] && [ -e "$WORKSPACE/.claude/skills/beta-collection-skill" ]; then
+    pass "collection skills installed into agent directory"
+  else
+    fail "collection skills not installed into expected directories"
+  fi
+
+  if [ -f "/root/.agents/.skill-lock.json" ]; then
+    local lock
+    lock=$(cat /root/.agents/.skill-lock.json)
+    assert_contains "$lock" '"@mock/alpha"' "lock records per-skill registry source"
+    assert_contains "$lock" '"@mock/beta"' "lock records second per-skill registry source"
+  else
+    fail "lock file missing after collection install"
+  fi
+
+  stop_mock_registry
+}
+
+# ════════════════════════════════════════════════════
+# Test: Install from shared collection URL
+# ════════════════════════════════════════════════════
+test_install_collection_url_source() {
+  header "Install from shared collection URL"
+  clean_workspace
+
+  start_mock_registry || return
+
+  local output
+  output=$(cd "$WORKSPACE" && ASKILL_REGISTRY_URL="http://127.0.0.1:${MOCK_REGISTRY_PORT}" ASKILL_API_BASE_URL="http://127.0.0.1:${MOCK_REGISTRY_PORT}/api/v1" $CLI add https://askill.sh/c/mock/dev-tools--grp123 -a claude-code -y 2>&1) || true
+
+  assert_contains "$output" "alpha-collection-skill" "collection URL installs alpha skill"
+  assert_contains "$output" "beta-collection-skill" "collection URL installs beta skill"
+
+  stop_mock_registry
+}
+
+# ════════════════════════════════════════════════════
+# Test: Install collection from PRODUCTION (real askill.sh)
+# ════════════════════════════════════════════════════
+test_install_collection_production() {
+  header "Install collection from production (col:cyhhao/test)"
+  clean_workspace
+
+  local output
+  output=$(cd "$WORKSPACE" && \
+    ASKILL_API_BASE_URL="https://askill.sh/api/v1" \
+    timeout 120 $CLI add col:cyhhao/test -a claude-code -y 2>&1) || true
+
+  # Verify the CLI processed the collection (check for skill names or install messages)
+  # The collection "test" has skills like flowio, beautiful-mermaid, whisper, discover-a-skill
+  if echo "$output" | strip_ansi | grep -qiE "Installing|skill\(s\) in collection|Installed"; then
+    pass "output shows install activity for collection"
+  else
+    fail "output does not show install activity"
+    echo "$output" | strip_ansi | head -15 | sed 's/^/    /'
+  fi
+
+  # Count how many skill directories were actually installed
+  local installed_count=0
+  if [ -d "$WORKSPACE/.claude/skills" ]; then
+    installed_count=$(ls -1d "$WORKSPACE/.claude/skills"/*/ 2>/dev/null | wc -l | tr -d ' ')
+  fi
+
+  if [ "$installed_count" -ge 1 ]; then
+    pass "installed $installed_count skill(s) from production collection"
+  else
+    fail "no skills installed from production collection"
+    echo -e "${DIM}    output (first 10 lines):${RESET}"
+    echo "$output" | strip_ansi | head -10 | sed 's/^/    /'
+  fi
+
+  # Verify lock file was created with real sources
+  if [ -f "/root/.agents/.skill-lock.json" ]; then
+    pass "lock file created after production collection install"
+  else
+    fail "lock file missing after production collection install"
+  fi
 }
 
 # ════════════════════════════════════════════════════
@@ -2119,6 +2265,10 @@ ALL_TESTS=(
   test_update_noop
   test_update_empty
   test_source_parser
+  test_help_collection_sources
+  test_install_collection_source
+  test_install_collection_url_source
+  test_install_collection_production
   test_install_published_slug
   test_install_git_clone
   test_check_after_git_install

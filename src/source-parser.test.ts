@@ -31,3 +31,29 @@ test('parseSource: gh: prefix forces GitHub', () => {
   assert.equal(parsed.repo, 'use-askill');
   assert.equal(parsed.url, 'https://github.com/avibe-bot/use-askill.git');
 });
+
+test('parseSource: col: prefix parses shared collection source', () => {
+  const parsed = parseSource('col:cyh/dev-tools--clx123abc');
+  assert.equal(parsed.type, 'collection');
+  assert.equal(parsed.collectionOwner, 'cyh');
+  assert.equal(parsed.collectionHandle, 'dev-tools--clx123abc');
+});
+
+test('parseSource: askill collection URL parses as collection source', () => {
+  const parsed = parseSource('https://askill.sh/c/cyh/dev-tools--clx123abc');
+  assert.equal(parsed.type, 'collection');
+  assert.equal(parsed.collectionOwner, 'cyh');
+  assert.equal(parsed.collectionHandle, 'dev-tools--clx123abc');
+});
+
+test('parseSource: askill collection URL allows trailing slash and query', () => {
+  const parsed = parseSource('https://askill.sh/c/cyh/dev-tools--clx123abc/?ref=share');
+  assert.equal(parsed.type, 'collection');
+  assert.equal(parsed.collectionOwner, 'cyh');
+  assert.equal(parsed.collectionHandle, 'dev-tools--clx123abc');
+});
+
+test('parseSource: invalid collection source with nested path falls back from collection parser', () => {
+  const parsed = parseSource('col:cyh/dev/tools');
+  assert.notEqual(parsed.type, 'collection');
+});

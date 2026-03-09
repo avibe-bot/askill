@@ -4,7 +4,7 @@
 import { isAbsolute, resolve } from 'path';
 
 export interface ParsedSource {
-  type: 'github' | 'local' | 'git' | 'registry';
+  type: 'github' | 'local' | 'git' | 'registry' | 'collection';
   url: string;            // Clone URL, resolved local path, or registry slug
   owner?: string;         // GitHub owner
   repo?: string;          // GitHub repo
@@ -13,6 +13,8 @@ export interface ParsedSource {
   skillFilter?: string;   // @skill filter (owner/repo@skill)
   localPath?: string;     // Resolved local path
   registrySlug?: string;  // Published slug (@author/slug[@version])
+  collectionOwner?: string;
+  collectionHandle?: string;
 }
 
 /**
@@ -29,8 +31,15 @@ export interface ParsedSource {
  * - "https://github.com/owner/repo/tree/branch/path" → GitHub clone + ref + subpath
  * - "./local/path"                        → Local directory
  * - "/absolute/path"                      → Local directory
+ * - "col:owner/collection-handle"         → Shared collection
+ * - "https://askill.sh/c/owner/handle"    → Shared collection page URL
  */
 export function parseSource(input: string): ParsedSource {
+  const collection = parseCollectionSource(input);
+  if (collection) {
+    return collection;
+  }
+
   // Published slug: @author/slug[@version]
   // Must be handled before GitHub shorthand parsing.
   if (isRegistrySlug(input)) {
@@ -153,4 +162,30 @@ function isRegistrySlug(input: string): boolean {
   if (!validSeg(slug)) return false;
 
   return true;
+}
+
+function parseCollectionSource(input: string): ParsedSource | null {
+  const prefixed = input.match(/^col:([^/\s]+)\/([^/\s?#]+)$/i);
+  if (prefixed) {
+    const [, owner, handle] = prefixed;
+    return {
+      type: 'collection',
+      url: `https://askill.sh/c/${owner}/${handle}`,
+      collectionOwner: owner,
+      collectionHandle: handle,
+    };
+  }
+
+  const urlMatch = input.match(/^https?:\/\/askill\.sh\/c\/([^/?#]+)\/([^/?#]+)\/?(?:\?[^#]*)?(?:#.*)?$/i);
+  if (urlMatch) {
+    const [, owner, handle] = urlMatch;
+    return {
+      type: 'collection',
+      url: `https://askill.sh/c/${owner}/${handle}`,
+      collectionOwner: owner,
+      collectionHandle: handle,
+    };
+  }
+
+  return null;
 }

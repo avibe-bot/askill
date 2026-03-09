@@ -10,6 +10,14 @@ export interface DiscoveredSkill {
   path: string;          // Absolute path to the skill directory
   rawContent: string;    // Raw SKILL.md content
   frontmatter: SkillFrontmatter;
+  sourceHint?: {
+    source: string;
+    sourceType: string;
+    sourceUrl: string;
+    owner?: string;
+    repo?: string;
+    skillPath?: string;
+  };
 }
 
 const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '__pycache__']);
