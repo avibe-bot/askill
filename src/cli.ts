@@ -15,7 +15,7 @@ import { discoverSkills, filterSkills, type DiscoveredSkill } from './discover.t
 import { getCollectionInstallRefs } from './collection.ts';
 import { cloneRepo, cleanupTempDir, GitCloneError } from './git.ts';
 import { addSkillToLock, removeSkillFromLock, fetchSkillFolderHash, saveLastSelectedAgents, getLastSelectedAgents, getAllLockedSkills } from './lock.ts';
-import { resolveRemoveTarget } from './remove-target.ts';
+import { resolveRemoveTarget, isPathLikeRemoveTarget } from './remove-target.ts';
 import { join } from 'path';
 import { homedir } from 'os';
 import * as p from '@clack/prompts';
@@ -1931,6 +1931,7 @@ async function runRemove(args: string[]): Promise<void> {
   const options = parseRemoveOptions(args);
   const { skillName } = options;
   const isGlobal = options.global;
+  const isPathLikeTarget = isPathLikeRemoveTarget(skillName);
 
   if (!skillName) {
     if (options.json) {
@@ -1958,7 +1959,8 @@ async function runRemove(args: string[]): Promise<void> {
   const spinner = createSpinner(options.json);
   spinner.start('Loading installed skills...');
 
-  const installedSkills = await listInstalledSkills({ global: isGlobal });
+  const installedSkillsScope = isGlobal ? true : isPathLikeTarget ? undefined : false;
+  const installedSkills = await listInstalledSkills({ global: installedSkillsScope });
   const resolvedTarget = resolveRemoveTarget(skillName, installedSkills, process.cwd());
 
   if (!resolvedTarget) {
@@ -1984,6 +1986,7 @@ async function runRemove(args: string[]): Promise<void> {
   }
 
   const resolvedSkillName = resolvedTarget.skillName;
+  const effectiveGlobalScope = isGlobal || (isPathLikeTarget && resolvedTarget.scope === 'global');
 
   const installedAgents = scopedAgents.length > 0
     ? scopedAgents
@@ -1992,15 +1995,14 @@ async function runRemove(args: string[]): Promise<void> {
   spinner.stop(`Found ${installedAgents.length} agent(s)`);
 
   // Find which agents have this skill
-  const skillEntry = installedSkills.find((skill) => skill.name === resolvedSkillName);
-  const agentsWithSkill = (skillEntry?.agents || []).filter((agent) => installedAgents.includes(agent));
+  const agentsWithSkill = resolvedTarget.agents.filter((agent) => installedAgents.includes(agent));
 
   if (agentsWithSkill.length === 0) {
     if (options.json) {
       printJson({
         ok: true,
         skill: resolvedSkillName,
-        scope: isGlobal ? 'global' : 'project',
+        scope: effectiveGlobalScope ? 'global' : 'project',
         requestedAgents: installedAgents.map(toAgentOutput),
         removedAgents: [],
         skippedAgents: installedAgents.map(toAgentOutput),
@@ -2018,7 +2020,7 @@ async function runRemove(args: string[]): Promise<void> {
   // Confirm removal
   if (!options.json) {
     const confirmed = await p.confirm({
-      message: `Remove ${pc.cyan(skillName)} from ${agentsWithSkill.length} agent(s)?`,
+      message: `Remove ${pc.cyan(resolvedSkillName)} from ${agentsWithSkill.length} agent(s)?`,
     });
 
     if (p.isCancel(confirmed) || !confirmed) {
@@ -2033,7 +2035,7 @@ async function runRemove(args: string[]): Promise<void> {
   const failedRemovals: Array<{ agent: AgentType; error: string }> = [];
 
   for (const agent of agentsWithSkill) {
-    const result = await removeSkill(resolvedSkillName, agent, { global: isGlobal });
+    const result = await removeSkill(resolvedSkillName, agent, { global: effectiveGlobalScope });
     if (result.success) {
       removedAgents.push(agent);
     } else {
@@ -2058,7 +2060,7 @@ async function runRemove(args: string[]): Promise<void> {
     printJson({
       ok: failedRemovals.length === 0,
       skill: resolvedSkillName,
-      scope: isGlobal ? 'global' : 'project',
+      scope: effectiveGlobalScope ? 'global' : 'project',
       requestedAgents: installedAgents.map(toAgentOutput),
       removedAgents: removedAgents.map(toAgentOutput),
       skippedAgents: skippedAgents.map(toAgentOutput),
