@@ -22,11 +22,13 @@ export class GitCloneError extends Error {
 }
 
 /**
- * Shallow clone a git repository to a temporary directory
+ * Clone a git repository to a temporary directory.
+ * Uses partial clone (`--filter=blob:none`) to avoid downloading all blobs,
+ * and supports sparse checkout for a specific subpath.
  */
-export async function cloneRepo(url: string, ref?: string): Promise<string> {
+export async function cloneRepo(url: string, ref?: string, subpath?: string): Promise<string> {
   const tempDir = await mkdtemp(join(tmpdir(), 'askill-'));
-  const args = ['clone', '--depth', '1'];
+  const args = ['clone', '--depth', '1', '--no-checkout', '--filter=blob:none'];
 
   if (ref) {
     args.push('--branch', ref);
@@ -35,7 +37,37 @@ export async function cloneRepo(url: string, ref?: string): Promise<string> {
   args.push(url, tempDir);
 
   try {
-    await execGit(args);
+    try {
+      await execGit(args);
+    } catch (error) {
+      const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+      const filterUnsupported =
+        message.includes('filter') ||
+        message.includes('blob:none') ||
+        message.includes('partial clone') ||
+        message.includes('uploadpack.allowfilter');
+
+      if (!filterUnsupported) {
+        throw error;
+      }
+
+      // Fallback for servers that don't support partial clone filters.
+      const fallbackArgs = args.filter((arg) => arg !== '--filter=blob:none');
+      await execGit(fallbackArgs);
+    }
+
+    const sparseSubpath = normalizeSparseSubpath(subpath);
+    if (sparseSubpath) {
+      try {
+        await execGit(['-C', tempDir, 'sparse-checkout', 'init', '--no-cone']);
+        await execGit(['-C', tempDir, 'sparse-checkout', 'set', '--no-cone', sparseSubpath]);
+      } catch {
+        // Sparse checkout is best-effort; fall back to full checkout.
+        await execGit(['-C', tempDir, 'sparse-checkout', 'disable']).catch(() => {});
+      }
+    }
+
+    await execGit(['-C', tempDir, 'checkout']);
     return tempDir;
   } catch (error) {
     // Clean up temp dir on failure
@@ -72,6 +104,18 @@ export async function cloneRepo(url: string, ref?: string): Promise<string> {
 
     throw new GitCloneError(`Failed to clone ${url}: ${errorMessage}`, url);
   }
+}
+
+function normalizeSparseSubpath(subpath?: string): string | undefined {
+  if (!subpath) return undefined;
+
+  const normalized = subpath
+    .trim()
+    .replace(/\\+/g, '/')
+    .replace(/^\.\//, '')
+    .replace(/^\/+/, '');
+
+  return normalized || undefined;
 }
 
 /**

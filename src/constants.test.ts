@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { VERSION } from './constants.ts';
 
 function loadConstants(env: NodeJS.ProcessEnv) {
   const result = spawnSync(
@@ -42,4 +44,12 @@ test('constants: allows overriding API and registry URLs', () => {
 
   assert.equal(values.registry, 'http://127.0.0.1:4010');
   assert.equal(values.api, 'http://127.0.0.1:4010/custom-api');
+});
+
+test('constants: VERSION matches package.json version', () => {
+  const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
+    version: string;
+  };
+
+  assert.equal(VERSION, packageJson.version);
 });
