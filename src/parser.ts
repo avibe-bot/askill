@@ -183,7 +183,94 @@ function parseValue(value: string): string {
  */
 export function extractDependencies(content: string): string[] {
   const { frontmatter } = parseSkillMd(content);
-  return frontmatter.dependencies || [];
+  const rawDependencies = (frontmatter as { dependencies?: unknown }).dependencies;
+
+  if (Array.isArray(rawDependencies)) {
+    return rawDependencies
+      .map((value) => String(value).trim())
+      .filter((value) => value.length > 0);
+  }
+
+  if (typeof rawDependencies === 'string') {
+    const trimmed = rawDependencies.trim();
+    if (!trimmed) return [];
+
+    let candidate = trimmed;
+    if (candidate.startsWith('[') && candidate.endsWith(']')) {
+      candidate = candidate.slice(1, -1).trim();
+    }
+
+    if (!candidate) return [];
+
+    return candidate
+      .split(',')
+      .map((value) => value.trim().replace(/^['"]|['"]$/g, ''))
+      .filter((value) => value.length > 0);
+  }
+
+  return [];
+}
+
+/**
+ * Validate whether a dependency string follows askill install syntax.
+ *
+ * Supported formats:
+ * - @author/skill
+ * - @author/skill@version
+ * - gh:owner/repo
+ * - gh:owner/repo@skill
+ * - gh:owner/repo/path/to/skill
+ */
+export function isValidDependencySpec(dep: string): boolean {
+  const trimmed = dep.trim();
+  if (!trimmed || /\s/.test(trimmed)) return false;
+
+  if (trimmed.startsWith('gh:')) {
+    const rest = trimmed.slice(3);
+    if (!rest) return false;
+
+    if (rest.includes('@')) {
+      const atIndex = rest.indexOf('@');
+      const repoPath = rest.slice(0, atIndex);
+      const skillName = rest.slice(atIndex + 1);
+      if (!repoPath || !skillName) return false;
+      const repoPathParts = repoPath.split('/');
+      if (repoPathParts.length !== 2) return false;
+      const [owner, repo] = repoPathParts;
+      return Boolean(owner && repo && !skillName.includes('/') && !skillName.includes('@') && !repo.includes('@'));
+    }
+
+    const parts = rest.split('/');
+    if (parts.length < 2) return false;
+
+    const [owner, repo] = parts;
+    if (!owner || !repo || repo.includes('@')) return false;
+
+    // gh:owner/repo is valid, and gh:owner/repo/path is also valid.
+    if (parts.length === 2) return true;
+    return parts.slice(2).join('/').trim().length > 0;
+  }
+
+  if (trimmed.startsWith('@')) {
+    const withoutPrefix = trimmed.slice(1);
+    const slashIndex = withoutPrefix.indexOf('/');
+    if (slashIndex <= 0) return false;
+
+    const scope = withoutPrefix.slice(0, slashIndex);
+    const rest = withoutPrefix.slice(slashIndex + 1);
+    if (!scope || !rest) return false;
+
+    const atIndex = rest.indexOf('@');
+    if (atIndex === -1) {
+      return !rest.includes('/');
+    }
+
+    const name = rest.slice(0, atIndex);
+    const version = rest.slice(atIndex + 1);
+    return Boolean(name && version && !name.includes('/') && !version.includes('@'));
+  }
+
+  return false;
 }
 
 /**

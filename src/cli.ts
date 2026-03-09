@@ -5,15 +5,17 @@
 
 import { VERSION, REGISTRY_URL, RESET, BOLD, DIM, CYAN, GREEN, YELLOW, RED, GRAY, agents, AGENTS_DIR, SKILLS_SUBDIR, POPULAR_AGENTS, type AgentType } from './constants.ts';
 import { api, APIError, type Skill, type RepoSkill } from './api.ts';
-import { installSkill, installSkillFromDir, detectInstalledAgents, listInstalledSkills, removeSkill, isSkillInstalled, sanitizeName, type InstallMode } from './installer.ts';
+import { installSkill, installSkillFromDir, detectInstalledAgents, listInstalledSkills, removeSkill, sanitizeName, type InstallMode } from './installer.ts';
 import { getAvailableUpdate, selfUpdate } from './updater.ts';
 import { getPreferredAgents, savePreferredAgents } from './config.ts';
 import { loadCredentials, saveCredentials, clearCredentials, maskToken } from './credentials.ts';
-import { extractDependencies, parseDependency, dependencyToSlug, parseSkillMd } from './parser.ts';
+import { extractDependencies, isValidDependencySpec, parseDependency, dependencyToSlug, parseSkillMd } from './parser.ts';
 import { parseSource, type ParsedSource } from './source-parser.ts';
 import { discoverSkills, filterSkills, type DiscoveredSkill } from './discover.ts';
+import { getCollectionInstallRefs } from './collection.ts';
 import { cloneRepo, cleanupTempDir, GitCloneError } from './git.ts';
 import { addSkillToLock, removeSkillFromLock, fetchSkillFolderHash, saveLastSelectedAgents, getLastSelectedAgents, getAllLockedSkills } from './lock.ts';
+import { resolveRemoveTarget } from './remove-target.ts';
 import { join } from 'path';
 import { homedir } from 'os';
 import * as p from '@clack/prompts';
@@ -124,7 +126,7 @@ ${BOLD}For Agents:${RESET}
 ${BOLD}Examples:${RESET}
   ${DIM}$${RESET} askill add anthropic/courses@prompt-eng
   ${DIM}$${RESET} askill add anthropic/courses
-  ${DIM}$${RESET} askill add col:cyh/dev-tools--clx123abc -y
+  ${DIM}$${RESET} askill add col:acme/dev-tools -y
   ${DIM}$${RESET} askill add ./my-skills/custom-skill
   ${DIM}$${RESET} askill find memory
   ${DIM}$${RESET} askill find memory --full-desc
@@ -249,9 +251,9 @@ function showCommandHelp(commandInput: string): boolean {
   const command = normalizeCommand(commandInput);
 
   const helps: Record<string, string> = {
-    add: `${BOLD}askill add${RESET}\n\nUsage:\n  askill add <source> [options]\n\nDescription:\n  Install skills from published slugs, GitHub, local directories, or shared collections.\n\nSources:\n  @author/skill-name\n  col:owner/collection-handle\n  https://askill.sh/c/owner/handle\n  gh:owner/repo@skill-name\n  gh:owner/repo/path/to/skill\n  owner/repo\n  ./local/path\n\nScope:\n  default: current project (.agents/skills/)\n  -g, --global: user-level install\n\nOptions:\n  -g, --global            Install globally\n  -a, --agent <agents...> Install to specific agents\n  -y, --yes               Skip confirmation prompts\n  --copy                  Copy files instead of symlink\n  -l, --list              Preview discovered skills only\n  --all                   Install all discovered skills\n  --json                  Output machine-readable JSON\n\nExamples:\n  askill add @johndoe/awesome-tool -y\n  askill add col:cyh/dev-tools--clx123abc -y\n  askill add gh:facebook/react@extract-errors\n  askill add owner/repo --all -a claude-code opencode -y\n\nGuide:\n  https://github.com/avibe-bot/askill/tree/main/skills/discover-a-skill`,
+    add: `${BOLD}askill add${RESET}\n\nUsage:\n  askill add <source> [options]\n\nDescription:\n  Install skills from published slugs, GitHub, local directories, or shared collections.\n\nSources:\n  @author/skill-name\n  col:owner/collection-handle\n  https://askill.sh/c/owner/handle\n  gh:owner/repo@skill-name\n  gh:owner/repo/path/to/skill\n  owner/repo\n  ./local/path\n\nScope:\n  default: current project (.agents/skills/)\n  -g, --global: user-level install\n\nOptions:\n  -g, --global            Install globally\n  -a, --agent <agents...> Install to specific agents\n  -y, --yes               Skip confirmation prompts\n  --copy                  Copy files instead of symlink\n  -l, --list              Preview discovered skills only\n  --all                   Install all discovered skills\n  --json                  Output machine-readable JSON\n\nExamples:\n  askill add @johndoe/awesome-tool -y\n  askill add col:acme/dev-tools -y\n  askill add gh:facebook/react@extract-errors\n  askill add owner/repo --all -a claude-code opencode -y\n\nGuide:\n  https://github.com/avibe-bot/askill/tree/main/skills/discover-a-skill`,
 
-    remove: `${BOLD}askill remove${RESET}\n\nUsage:\n  askill remove <skill> [options]\n\nDescription:\n  Remove an installed skill from detected agents.\n\nOptions:\n  -g, --global            Remove global installation\n  -a, --agent <agents...> Remove only from specific agents\n  --json                  Output machine-readable JSON\n\nExamples:\n  askill remove memory\n  askill remove memory -g\n  askill remove memory -a opencode codex --json`,
+    remove: `${BOLD}askill remove${RESET}\n\nUsage:\n  askill remove <skill-or-path> [options]\n\nDescription:\n  Remove an installed skill by name or installed path.\n\nOptions:\n  -g, --global            Remove global installation\n  -a, --agent <agents...> Remove only from specific agents\n  --json                  Output machine-readable JSON\n\nExamples:\n  askill remove memory\n  askill remove .agents/skills/memory\n  askill remove memory -g\n  askill remove memory -a opencode codex --json`,
 
     list: `${BOLD}askill list${RESET}\n\nUsage:\n  askill list [options]\n\nDescription:\n  List installed skills and where they are available.\n\nOptions:\n  -g, --global            Show global skills only\n  -p, --project           Show project skills only\n  -a, --agent <agents...> Filter by agent(s)\n  --json                  Output machine-readable JSON\n\nExamples:\n  askill list\n  askill list -g\n  askill list -p -a opencode --json`,
 
@@ -378,25 +380,42 @@ async function resolveSkills(
 
     const resolvedSkills: DiscoveredSkill[] = [];
     const skippedRefs: string[] = [];
+    const nestedSpinner = createSpinner(true);
     for (const item of collection.skills) {
-      try {
-        const ref = item.installRef;
-        spinner.message(`Resolving ${ref}...`);
-        const result = await resolveSkills(ref, spinner, options);
-        // Clean up any tempDir immediately; we only need rawContent for collection skills
-        if (result.tempDir) {
-          await cleanupTempDir(result.tempDir).catch(() => {});
-        }
-        for (const skill of result.skills) {
-          // Clear path so installer uses rawContent (tempDir is already cleaned up)
-          skill.path = '';
-          // Preserve source hint from per-skill resolution
-          if (!skill.sourceHint) {
-            skill.sourceHint = toSkillSourceHint(ref);
+      const refsToTry = getCollectionInstallRefs(item);
+      let resolved = false;
+
+      for (const ref of refsToTry) {
+        try {
+          spinner.message(`Resolving ${ref}...`);
+          const result = await resolveSkills(ref, nestedSpinner, { ...options, json: true });
+          if (result.skills.length === 0) {
+            if (result.tempDir) {
+              await cleanupTempDir(result.tempDir).catch(() => {});
+            }
+            continue;
           }
-          resolvedSkills.push(skill);
+          // Clean up any tempDir immediately; we only need rawContent for collection skills
+          if (result.tempDir) {
+            await cleanupTempDir(result.tempDir).catch(() => {});
+          }
+          for (const skill of result.skills) {
+            // Clear path so installer uses rawContent (tempDir is already cleaned up)
+            skill.path = '';
+            // Preserve source hint from per-skill resolution
+            if (!skill.sourceHint) {
+              skill.sourceHint = toSkillSourceHint(ref);
+            }
+            resolvedSkills.push(skill);
+          }
+          resolved = true;
+          break;
+        } catch {
+          // Try next candidate install ref.
         }
-      } catch {
+      }
+
+      if (!resolved) {
         skippedRefs.push(item.installRef);
       }
     }
@@ -764,6 +783,8 @@ async function runInstallJson(skillName: string, options: InstallOptions): Promi
 
     const allResults: Array<{ skill: string; agent: AgentType; success: boolean; error?: string; isDependency?: boolean }> = [];
     const installedNames = new Set<string>();
+    const invalidDependencies: Array<{ skill: string; dependency: string }> = [];
+    const invalidDependencyKeys = new Set<string>();
 
     const normalizeDepKey = (value: string) => value.replace(/^gh:/, '').toLowerCase();
     const toApiSlug = (value: string) => value.replace(/^gh:/, '');
@@ -799,7 +820,17 @@ async function runInstallJson(skillName: string, options: InstallOptions): Promi
       if (dependencies.length === 0) return;
 
       for (const dep of dependencies) {
-        const parsedDependency = parseDependency(dep);
+        const normalizedDependency = dep.trim();
+        if (!isValidDependencySpec(normalizedDependency)) {
+          const invalidKey = `${skill.name}\u0000${normalizedDependency}`;
+          if (!invalidDependencyKeys.has(invalidKey)) {
+            invalidDependencyKeys.add(invalidKey);
+            invalidDependencies.push({ skill: skill.name, dependency: normalizedDependency });
+          }
+          continue;
+        }
+
+        const parsedDependency = parseDependency(normalizedDependency);
         const dependencySlug = dependencyToSlug(parsedDependency);
         const dependencyKey = normalizeDepKey(dependencySlug);
 
@@ -813,7 +844,7 @@ async function runInstallJson(skillName: string, options: InstallOptions): Promi
           const parsedContent = parseSkillMd(depContent);
           const resolvedName = depSkill.name
             || parsedContent.frontmatter.name
-            || parsedDependency.skill || parsedDependency.name || dep;
+            || parsedDependency.skill || parsedDependency.name || normalizedDependency;
           const resolvedDescription = depSkill.description
             || parsedContent.frontmatter.description || '';
 
@@ -833,7 +864,7 @@ async function runInstallJson(skillName: string, options: InstallOptions): Promi
           const errorMessage = error instanceof Error ? error.message : 'Failed to resolve dependency';
           for (const agent of targetAgents) {
             allResults.push({
-              skill: `${dep} (dependency of ${skill.name})`,
+              skill: `${normalizedDependency} (dependency of ${skill.name})`,
               agent,
               success: false,
               error: errorMessage,
@@ -935,7 +966,12 @@ async function runInstallJson(skillName: string, options: InstallOptions): Promi
         failed: failed.length,
         skills: new Set(mainSkills.map((result) => result.skill)).size,
         dependencies: new Set(dependencySkills.map((result) => result.skill)).size,
+        skippedInvalidDependencies: invalidDependencies.length,
       },
+      skippedDependencies: invalidDependencies.map((item) => ({
+        skill: item.skill,
+        dependency: item.dependency,
+      })),
       results: allResults.map((result) => ({
         skill: result.skill,
         agent: toAgentOutput(result.agent),
@@ -1065,10 +1101,16 @@ async function runInstall(args: string[]): Promise<void> {
     }
     targetAgents = options.agent as AgentType[];
   } else {
-    spinner.start('Detecting installed agents...');
-    const installedAgents = await detectInstalledAgents();
+    let installedAgents: AgentType[];
+    if (plainMode) {
+      spinner.start('Detecting installed agents...');
+      installedAgents = await detectInstalledAgents();
+      spinner.stop(`Found ${installedAgents.length} agent(s)`);
+    } else {
+      installedAgents = await detectInstalledAgents();
+      p.log.info(`Found ${installedAgents.length} agent(s)`);
+    }
     const preferredAgents = (await getLastSelectedAgents()) || (await getPreferredAgents());
-    spinner.stop(`Found ${installedAgents.length} agent(s)`);
 
     if (installedAgents.length === 0) {
       if (options.yes) {
@@ -1170,6 +1212,8 @@ async function runInstall(args: string[]): Promise<void> {
 
   const allResults: Array<{ skill: string; agent: string; success: boolean; error?: string; isDependency?: boolean }> = [];
   const installedNames = new Set<string>(); // Track installed skills to avoid duplicates (normalized keys)
+  const invalidDependencies: Array<{ skill: string; dependency: string }> = [];
+  const invalidDependencyKeys = new Set<string>();
 
   // Normalize a dependency key for dedup: strip gh: prefix, lowercase
   const normalizeDepKey = (s: string) => s.replace(/^gh:/, '').toLowerCase();
@@ -1212,7 +1256,17 @@ async function runInstall(args: string[]): Promise<void> {
     spinner.message(`Resolving dependencies for ${skill.name}...`);
 
     for (const dep of dependencies) {
-      const parsed = parseDependency(dep);
+      const normalizedDependency = dep.trim();
+      if (!isValidDependencySpec(normalizedDependency)) {
+        const invalidKey = `${skill.name}\u0000${normalizedDependency}`;
+        if (!invalidDependencyKeys.has(invalidKey)) {
+          invalidDependencyKeys.add(invalidKey);
+          invalidDependencies.push({ skill: skill.name, dependency: normalizedDependency });
+        }
+        continue;
+      }
+
+      const parsed = parseDependency(normalizedDependency);
       const depSlug = dependencyToSlug(parsed);
       const depKey = normalizeDepKey(depSlug);
 
@@ -1229,7 +1283,7 @@ async function runInstall(args: string[]): Promise<void> {
         const parsedContent = parseSkillMd(depContent);
         const name = depSkill.name
           || parsedContent.frontmatter.name
-          || parsed.skill || parsed.name || dep;
+          || parsed.skill || parsed.name || normalizedDependency;
         const description = depSkill.description
           || parsedContent.frontmatter.description || '';
 
@@ -1254,7 +1308,7 @@ async function runInstall(args: string[]): Promise<void> {
         const errorMsg = error instanceof Error ? error.message : 'Failed to resolve dependency';
         for (const agent of targetAgents) {
           allResults.push({
-            skill: `${dep} (dependency of ${skill.name})`,
+            skill: `${normalizedDependency} (dependency of ${skill.name})`,
             agent,
             success: false,
             error: errorMsg,
@@ -1377,6 +1431,17 @@ async function runInstall(args: string[]): Promise<void> {
     for (const r of failed) {
       const agentName = agents[r.agent as AgentType]?.displayName || r.agent;
       console.log(`  ${pc.red('✗')} ${r.skill} → ${agentName}: ${pc.dim(r.error || 'Unknown error')}`);
+    }
+  }
+
+  if (invalidDependencies.length > 0) {
+    console.log();
+    p.log.warning(`Skipped ${invalidDependencies.length} invalid dependenc${invalidDependencies.length === 1 ? 'y declaration' : 'y declarations'}`);
+    for (const item of invalidDependencies.slice(0, 5)) {
+      console.log(`  ${pc.yellow('!')} ${item.dependency} ${pc.dim(`(declared by ${item.skill})`)}`);
+    }
+    if (invalidDependencies.length > 5) {
+      console.log(`  ${pc.dim(`...and ${invalidDependencies.length - 5} more`)}`);
     }
   }
 
@@ -1872,7 +1937,7 @@ async function runRemove(args: string[]): Promise<void> {
       printJsonError('MISSING_SKILL', 'Missing skill name');
     }
     console.log(`${RED}Error: Missing skill name${RESET}`);
-    console.log(`Usage: askill remove <skill-name>`);
+    console.log(`Usage: askill remove <skill-or-path>`);
     process.exit(1);
   }
 
@@ -1891,7 +1956,34 @@ async function runRemove(args: string[]): Promise<void> {
   }
 
   const spinner = createSpinner(options.json);
-  spinner.start('Detecting agents...');
+  spinner.start('Loading installed skills...');
+
+  const installedSkills = await listInstalledSkills({ global: isGlobal });
+  const resolvedTarget = resolveRemoveTarget(skillName, installedSkills, process.cwd());
+
+  if (!resolvedTarget) {
+    spinner.stop('No matching skill found');
+
+    if (options.json) {
+      printJson({
+        ok: true,
+        skill: skillName,
+        scope: isGlobal ? 'global' : 'project',
+        requestedAgents: scopedAgents.map(toAgentOutput),
+        removedAgents: [],
+        skippedAgents: scopedAgents.map(toAgentOutput),
+        failed: [],
+        message: `Skill \"${skillName}\" not found`,
+      });
+      return;
+    }
+
+    p.log.info(`Skill "${skillName}" not found`);
+    p.outro('');
+    return;
+  }
+
+  const resolvedSkillName = resolvedTarget.skillName;
 
   const installedAgents = scopedAgents.length > 0
     ? scopedAgents
@@ -1900,29 +1992,25 @@ async function runRemove(args: string[]): Promise<void> {
   spinner.stop(`Found ${installedAgents.length} agent(s)`);
 
   // Find which agents have this skill
-  const agentsWithSkill: AgentType[] = [];
-  for (const agent of installedAgents) {
-    if (await isSkillInstalled(skillName, agent, { global: isGlobal })) {
-      agentsWithSkill.push(agent);
-    }
-  }
+  const skillEntry = installedSkills.find((skill) => skill.name === resolvedSkillName);
+  const agentsWithSkill = (skillEntry?.agents || []).filter((agent) => installedAgents.includes(agent));
 
   if (agentsWithSkill.length === 0) {
     if (options.json) {
       printJson({
         ok: true,
-        skill: skillName,
+        skill: resolvedSkillName,
         scope: isGlobal ? 'global' : 'project',
         requestedAgents: installedAgents.map(toAgentOutput),
         removedAgents: [],
         skippedAgents: installedAgents.map(toAgentOutput),
         failed: [],
-        message: `Skill "${skillName}" not found`,
+        message: `Skill "${resolvedSkillName}" not found for requested agents`,
       });
       return;
     }
 
-    p.log.info(`Skill "${skillName}" not found`);
+    p.log.info(`Skill "${resolvedSkillName}" not found for requested agents`);
     p.outro('');
     return;
   }
@@ -1945,7 +2033,7 @@ async function runRemove(args: string[]): Promise<void> {
   const failedRemovals: Array<{ agent: AgentType; error: string }> = [];
 
   for (const agent of agentsWithSkill) {
-    const result = await removeSkill(skillName, agent, { global: isGlobal });
+    const result = await removeSkill(resolvedSkillName, agent, { global: isGlobal });
     if (result.success) {
       removedAgents.push(agent);
     } else {
@@ -1958,7 +2046,7 @@ async function runRemove(args: string[]): Promise<void> {
 
   // Remove from lock file
   if (removedAgents.length > 0) {
-    await removeSkillFromLock(skillName).catch(() => {
+    await removeSkillFromLock(resolvedSkillName).catch(() => {
       // Non-critical: lock file cleanup failure shouldn't fail removal
     });
   }
@@ -1969,7 +2057,7 @@ async function runRemove(args: string[]): Promise<void> {
     const skippedAgents = installedAgents.filter((agent) => !agentsWithSkill.includes(agent));
     printJson({
       ok: failedRemovals.length === 0,
-      skill: skillName,
+      skill: resolvedSkillName,
       scope: isGlobal ? 'global' : 'project',
       requestedAgents: installedAgents.map(toAgentOutput),
       removedAgents: removedAgents.map(toAgentOutput),
@@ -1993,11 +2081,11 @@ async function runRemove(args: string[]): Promise<void> {
       const agentName = agents[failed.agent]?.displayName || failed.agent;
       console.log(`  ${pc.red('✗')} ${agentName}: ${pc.dim(failed.error)}`);
     }
-    p.outro(pc.yellow(`Removed ${skillName} from ${removedAgents.length} agent(s), with errors`));
+    p.outro(pc.yellow(`Removed ${resolvedSkillName} from ${removedAgents.length} agent(s), with errors`));
     process.exit(1);
   }
 
-  p.outro(pc.green(`Removed ${skillName} from ${removedAgents.length} agent(s)`));
+  p.outro(pc.green(`Removed ${resolvedSkillName} from ${removedAgents.length} agent(s)`));
 }
 
 // ============================================
