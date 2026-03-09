@@ -456,7 +456,7 @@ async function resolveSkills(
     spinner.start(`Cloning ${parsed.owner ? `${parsed.owner}/${parsed.repo}` : parsed.url}...`);
 
     try {
-      const tempDir = await cloneRepo(parsed.url, parsed.ref);
+      const tempDir = await cloneRepo(parsed.url, parsed.ref, parsed.subpath);
       spinner.stop('Repository cloned');
 
       spinner.start('Discovering skills...');
@@ -2311,7 +2311,7 @@ async function runUpdate(args: string[]): Promise<void> {
     let tempDir: string | undefined;
     try {
       // Clone the source repo
-      tempDir = await cloneRepo(u.sourceUrl);
+      tempDir = await cloneRepo(u.sourceUrl, undefined, u.skillPath);
 
       // Discover the specific skill
       let discovered = await discoverSkills(tempDir, u.skillPath);
