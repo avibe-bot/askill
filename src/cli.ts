@@ -125,7 +125,7 @@ ${BOLD}For Agents:${RESET}
 ${BOLD}Examples:${RESET}
   ${DIM}$${RESET} askill add anthropic/courses@prompt-eng
   ${DIM}$${RESET} askill add anthropic/courses
-  ${DIM}$${RESET} askill add col:cyh/dev-tools--clx123abc -y
+  ${DIM}$${RESET} askill add col:acme/dev-tools -y
   ${DIM}$${RESET} askill add ./my-skills/custom-skill
   ${DIM}$${RESET} askill find memory
   ${DIM}$${RESET} askill find memory --full-desc
@@ -250,7 +250,7 @@ function showCommandHelp(commandInput: string): boolean {
   const command = normalizeCommand(commandInput);
 
   const helps: Record<string, string> = {
-    add: `${BOLD}askill add${RESET}\n\nUsage:\n  askill add <source> [options]\n\nDescription:\n  Install skills from published slugs, GitHub, local directories, or shared collections.\n\nSources:\n  @author/skill-name\n  col:owner/collection-handle\n  https://askill.sh/c/owner/handle\n  gh:owner/repo@skill-name\n  gh:owner/repo/path/to/skill\n  owner/repo\n  ./local/path\n\nScope:\n  default: current project (.agents/skills/)\n  -g, --global: user-level install\n\nOptions:\n  -g, --global            Install globally\n  -a, --agent <agents...> Install to specific agents\n  -y, --yes               Skip confirmation prompts\n  --copy                  Copy files instead of symlink\n  -l, --list              Preview discovered skills only\n  --all                   Install all discovered skills\n  --json                  Output machine-readable JSON\n\nExamples:\n  askill add @johndoe/awesome-tool -y\n  askill add col:cyh/dev-tools--clx123abc -y\n  askill add gh:facebook/react@extract-errors\n  askill add owner/repo --all -a claude-code opencode -y\n\nGuide:\n  https://github.com/avibe-bot/askill/tree/main/skills/discover-a-skill`,
+    add: `${BOLD}askill add${RESET}\n\nUsage:\n  askill add <source> [options]\n\nDescription:\n  Install skills from published slugs, GitHub, local directories, or shared collections.\n\nSources:\n  @author/skill-name\n  col:owner/collection-handle\n  https://askill.sh/c/owner/handle\n  gh:owner/repo@skill-name\n  gh:owner/repo/path/to/skill\n  owner/repo\n  ./local/path\n\nScope:\n  default: current project (.agents/skills/)\n  -g, --global: user-level install\n\nOptions:\n  -g, --global            Install globally\n  -a, --agent <agents...> Install to specific agents\n  -y, --yes               Skip confirmation prompts\n  --copy                  Copy files instead of symlink\n  -l, --list              Preview discovered skills only\n  --all                   Install all discovered skills\n  --json                  Output machine-readable JSON\n\nExamples:\n  askill add @johndoe/awesome-tool -y\n  askill add col:acme/dev-tools -y\n  askill add gh:facebook/react@extract-errors\n  askill add owner/repo --all -a claude-code opencode -y\n\nGuide:\n  https://github.com/avibe-bot/askill/tree/main/skills/discover-a-skill`,
 
     remove: `${BOLD}askill remove${RESET}\n\nUsage:\n  askill remove <skill> [options]\n\nDescription:\n  Remove an installed skill from detected agents.\n\nOptions:\n  -g, --global            Remove global installation\n  -a, --agent <agents...> Remove only from specific agents\n  --json                  Output machine-readable JSON\n\nExamples:\n  askill remove memory\n  askill remove memory -g\n  askill remove memory -a opencode codex --json`,
 
