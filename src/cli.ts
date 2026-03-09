@@ -379,6 +379,7 @@ async function resolveSkills(
 
     const resolvedSkills: DiscoveredSkill[] = [];
     const skippedRefs: string[] = [];
+    const nestedSpinner = createSpinner(true);
     for (const item of collection.skills) {
       const refsToTry = getCollectionInstallRefs(item);
       let resolved = false;
@@ -386,7 +387,7 @@ async function resolveSkills(
       for (const ref of refsToTry) {
         try {
           spinner.message(`Resolving ${ref}...`);
-          const result = await resolveSkills(ref, spinner, { ...options, json: true });
+          const result = await resolveSkills(ref, nestedSpinner, { ...options, json: true });
           if (result.skills.length === 0) {
             if (result.tempDir) {
               await cleanupTempDir(result.tempDir).catch(() => {});

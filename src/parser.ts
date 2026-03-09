@@ -183,7 +183,32 @@ function parseValue(value: string): string {
  */
 export function extractDependencies(content: string): string[] {
   const { frontmatter } = parseSkillMd(content);
-  return frontmatter.dependencies || [];
+  const rawDependencies = (frontmatter as { dependencies?: unknown }).dependencies;
+
+  if (Array.isArray(rawDependencies)) {
+    return rawDependencies
+      .map((value) => String(value).trim())
+      .filter((value) => value.length > 0);
+  }
+
+  if (typeof rawDependencies === 'string') {
+    const trimmed = rawDependencies.trim();
+    if (!trimmed) return [];
+
+    let candidate = trimmed;
+    if (candidate.startsWith('[') && candidate.endsWith(']')) {
+      candidate = candidate.slice(1, -1).trim();
+    }
+
+    if (!candidate) return [];
+
+    return candidate
+      .split(',')
+      .map((value) => value.trim().replace(/^['"]|['"]$/g, ''))
+      .filter((value) => value.length > 0);
+  }
+
+  return [];
 }
 
 /**
