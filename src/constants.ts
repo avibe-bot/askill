@@ -1,6 +1,6 @@
 // askill CLI Constants and Configuration
 
-export const VERSION = '0.1.10';
+export const VERSION = '0.1.11';
 const registryUrlOverride = process.env.ASKILL_REGISTRY_URL?.trim();
 const apiBaseUrlOverride = process.env.ASKILL_API_BASE_URL?.trim();
 
