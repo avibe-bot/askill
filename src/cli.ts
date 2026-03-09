@@ -373,25 +373,29 @@ async function resolveSkills(
 
     spinner.start(`Fetching collection ${collectionOwner}/${collectionHandle}...`);
     const collection = await api.getCollection(collectionOwner, collectionHandle);
-    spinner.message(`Resolving ${collection.skills.length} skill(s)...`);
+    spinner.stop(`Collection ${collectionOwner}/${collectionHandle}: ${collection.skills.length} skill(s)`);
+    spinner.start(`Resolving skills...`);
 
     const resolvedSkills: DiscoveredSkill[] = [];
     const skippedRefs: string[] = [];
     for (const item of collection.skills) {
       try {
-        const slug = item.installRef;
-        const skill = await api.getSkill(slug);
-        const content = await api.getSkillRaw(slug);
-        const parsedContent = parseSkillMd(content);
-
-        resolvedSkills.push({
-          name: parsedContent.frontmatter.name || skill.name || item.skillName || slug,
-          description: parsedContent.frontmatter.description || skill.description || item.description || '',
-          path: '',
-          rawContent: content,
-          frontmatter: parsedContent.frontmatter,
-          sourceHint: toSkillSourceHint(slug),
-        });
+        const ref = item.installRef;
+        spinner.message(`Resolving ${ref}...`);
+        const result = await resolveSkills(ref, spinner, options);
+        // Clean up any tempDir immediately; we only need rawContent for collection skills
+        if (result.tempDir) {
+          await cleanupTempDir(result.tempDir).catch(() => {});
+        }
+        for (const skill of result.skills) {
+          // Clear path so installer uses rawContent (tempDir is already cleaned up)
+          skill.path = '';
+          // Preserve source hint from per-skill resolution
+          if (!skill.sourceHint) {
+            skill.sourceHint = toSkillSourceHint(ref);
+          }
+          resolvedSkills.push(skill);
+        }
       } catch {
         skippedRefs.push(item.installRef);
       }

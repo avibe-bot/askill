@@ -724,6 +724,49 @@ test_install_collection_url_source() {
 }
 
 # ════════════════════════════════════════════════════
+# Test: Install collection from PRODUCTION (real askill.sh)
+# ════════════════════════════════════════════════════
+test_install_collection_production() {
+  header "Install collection from production (col:cyhhao/test)"
+  clean_workspace
+
+  local output
+  output=$(cd "$WORKSPACE" && \
+    ASKILL_API_BASE_URL="https://askill.sh/api/v1" \
+    timeout 120 $CLI add col:cyhhao/test -a claude-code -y 2>&1) || true
+
+  # Verify the CLI processed the collection (check for skill names or install messages)
+  # The collection "test" has skills like flowio, beautiful-mermaid, whisper, discover-a-skill
+  if echo "$output" | strip_ansi | grep -qiE "Installing|skill\(s\) in collection|Installed"; then
+    pass "output shows install activity for collection"
+  else
+    fail "output does not show install activity"
+    echo "$output" | strip_ansi | head -15 | sed 's/^/    /'
+  fi
+
+  # Count how many skill directories were actually installed
+  local installed_count=0
+  if [ -d "$WORKSPACE/.claude/skills" ]; then
+    installed_count=$(ls -1d "$WORKSPACE/.claude/skills"/*/ 2>/dev/null | wc -l | tr -d ' ')
+  fi
+
+  if [ "$installed_count" -ge 1 ]; then
+    pass "installed $installed_count skill(s) from production collection"
+  else
+    fail "no skills installed from production collection"
+    echo -e "${DIM}    output (first 10 lines):${RESET}"
+    echo "$output" | strip_ansi | head -10 | sed 's/^/    /'
+  fi
+
+  # Verify lock file was created with real sources
+  if [ -f "/root/.agents/.skill-lock.json" ]; then
+    pass "lock file created after production collection install"
+  else
+    fail "lock file missing after production collection install"
+  fi
+}
+
+# ════════════════════════════════════════════════════
 # Test: Install indexed GitHub slug (gh:owner/repo@skill)
 # ════════════════════════════════════════════════════
 test_install_published_slug() {
@@ -2225,6 +2268,7 @@ ALL_TESTS=(
   test_help_collection_sources
   test_install_collection_source
   test_install_collection_url_source
+  test_install_collection_production
   test_install_published_slug
   test_install_git_clone
   test_check_after_git_install
