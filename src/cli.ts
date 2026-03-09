@@ -12,6 +12,7 @@ import { loadCredentials, saveCredentials, clearCredentials, maskToken } from '.
 import { extractDependencies, parseDependency, dependencyToSlug, parseSkillMd } from './parser.ts';
 import { parseSource, type ParsedSource } from './source-parser.ts';
 import { discoverSkills, filterSkills, type DiscoveredSkill } from './discover.ts';
+import { getCollectionInstallRefs } from './collection.ts';
 import { cloneRepo, cleanupTempDir, GitCloneError } from './git.ts';
 import { addSkillToLock, removeSkillFromLock, fetchSkillFolderHash, saveLastSelectedAgents, getLastSelectedAgents, getAllLockedSkills } from './lock.ts';
 import { join } from 'path';
@@ -379,24 +380,40 @@ async function resolveSkills(
     const resolvedSkills: DiscoveredSkill[] = [];
     const skippedRefs: string[] = [];
     for (const item of collection.skills) {
-      try {
-        const ref = item.installRef;
-        spinner.message(`Resolving ${ref}...`);
-        const result = await resolveSkills(ref, spinner, options);
-        // Clean up any tempDir immediately; we only need rawContent for collection skills
-        if (result.tempDir) {
-          await cleanupTempDir(result.tempDir).catch(() => {});
-        }
-        for (const skill of result.skills) {
-          // Clear path so installer uses rawContent (tempDir is already cleaned up)
-          skill.path = '';
-          // Preserve source hint from per-skill resolution
-          if (!skill.sourceHint) {
-            skill.sourceHint = toSkillSourceHint(ref);
+      const refsToTry = getCollectionInstallRefs(item);
+      let resolved = false;
+
+      for (const ref of refsToTry) {
+        try {
+          spinner.message(`Resolving ${ref}...`);
+          const result = await resolveSkills(ref, spinner, { ...options, json: true });
+          if (result.skills.length === 0) {
+            if (result.tempDir) {
+              await cleanupTempDir(result.tempDir).catch(() => {});
+            }
+            continue;
           }
-          resolvedSkills.push(skill);
+          // Clean up any tempDir immediately; we only need rawContent for collection skills
+          if (result.tempDir) {
+            await cleanupTempDir(result.tempDir).catch(() => {});
+          }
+          for (const skill of result.skills) {
+            // Clear path so installer uses rawContent (tempDir is already cleaned up)
+            skill.path = '';
+            // Preserve source hint from per-skill resolution
+            if (!skill.sourceHint) {
+              skill.sourceHint = toSkillSourceHint(ref);
+            }
+            resolvedSkills.push(skill);
+          }
+          resolved = true;
+          break;
+        } catch {
+          // Try next candidate install ref.
         }
-      } catch {
+      }
+
+      if (!resolved) {
         skippedRefs.push(item.installRef);
       }
     }
@@ -1065,10 +1082,16 @@ async function runInstall(args: string[]): Promise<void> {
     }
     targetAgents = options.agent as AgentType[];
   } else {
-    spinner.start('Detecting installed agents...');
-    const installedAgents = await detectInstalledAgents();
+    let installedAgents: AgentType[];
+    if (plainMode) {
+      spinner.start('Detecting installed agents...');
+      installedAgents = await detectInstalledAgents();
+      spinner.stop(`Found ${installedAgents.length} agent(s)`);
+    } else {
+      installedAgents = await detectInstalledAgents();
+      p.log.info(`Found ${installedAgents.length} agent(s)`);
+    }
     const preferredAgents = (await getLastSelectedAgents()) || (await getPreferredAgents());
-    spinner.stop(`Found ${installedAgents.length} agent(s)`);
 
     if (installedAgents.length === 0) {
       if (options.yes) {
