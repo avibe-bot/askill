@@ -49,3 +49,13 @@ test('resolveRemoveTarget: returns null when target not installed', () => {
 
   assert.equal(resolved, null);
 });
+
+test('resolveRemoveTarget: keeps global scope when path points to global canonical dir', () => {
+  const skills = [makeSkill('memory', 'global')];
+  const resolved = resolveRemoveTarget('/home/test/.agents/skills/memory', skills, cwd);
+
+  assert.ok(resolved);
+  assert.equal(resolved.skillName, 'memory');
+  assert.equal(resolved.matchedBy, 'path');
+  assert.equal(resolved.scope, 'global');
+});

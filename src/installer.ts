@@ -419,13 +419,16 @@ export async function removeSkill(
 
   const sanitized = sanitizeName(skillName);
   const cwd = options.cwd || process.cwd();
+  const isGlobal = options.global ?? false;
 
-  if (options.global && !agent.globalSkillsDir) {
+  if (isGlobal && !agent.globalSkillsDir) {
     return { success: false, error: `${agent.displayName} does not support global skills` };
   }
 
-  const agentBase = options.global ? agent.globalSkillsDir! : join(cwd, agent.skillsDir);
+  const agentBase = isGlobal ? agent.globalSkillsDir! : join(cwd, agent.skillsDir);
   const skillDir = join(agentBase, sanitized);
+  const canonicalBase = getCanonicalSkillsDir(isGlobal, cwd);
+  const canonicalDir = join(canonicalBase, sanitized);
 
   if (!isPathSafe(agentBase, skillDir)) {
     return { success: false, error: 'Invalid skill name' };
@@ -433,6 +436,80 @@ export async function removeSkill(
 
   try {
     await rm(skillDir, { recursive: true, force: true });
+
+    // Best-effort canonical cleanup: if no agent path references this skill anymore,
+    // remove the canonical skill directory to avoid orphan entries in `askill list`.
+    const hasRemainingReferences = await hasAnyAgentSkillReference(sanitized, isGlobal, cwd);
+    if (!hasRemainingReferences) {
+      await rm(canonicalDir, { recursive: true, force: true }).catch(() => {});
+    }
+
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+}
+
+async function hasAnyAgentSkillReference(
+  sanitizedSkillName: string,
+  globalScope: boolean,
+  cwd: string
+): Promise<boolean> {
+  const canonicalBase = getCanonicalSkillsDir(globalScope, cwd);
+  const canonicalSkillDir = normalize(resolve(join(canonicalBase, sanitizedSkillName)));
+
+  for (const agentConfig of Object.values(agents)) {
+    if (globalScope && !agentConfig.globalSkillsDir) {
+      continue;
+    }
+
+    const agentBase = globalScope
+      ? agentConfig.globalSkillsDir!
+      : join(cwd, agentConfig.skillsDir);
+    const agentSkillDir = join(agentBase, sanitizedSkillName);
+
+    if (!isPathSafe(agentBase, agentSkillDir)) {
+      continue;
+    }
+
+    const resolvedAgentSkillDir = normalize(resolve(agentSkillDir));
+    if (resolvedAgentSkillDir === canonicalSkillDir) {
+      // Some agents use the canonical skills directory directly.
+      // That path should not be considered an independent reference.
+      continue;
+    }
+
+    try {
+      await access(agentSkillDir);
+      return true;
+    } catch {
+      // Keep checking other agent directories
+    }
+  }
+
+  return false;
+}
+
+export async function removeCanonicalSkill(
+  skillName: string,
+  options: { global?: boolean; cwd?: string } = {}
+): Promise<{ success: boolean; error?: string }> {
+  const sanitized = sanitizeName(skillName);
+  const cwd = options.cwd || process.cwd();
+  const isGlobal = options.global ?? false;
+
+  const canonicalBase = getCanonicalSkillsDir(isGlobal, cwd);
+  const canonicalDir = join(canonicalBase, sanitized);
+
+  if (!isPathSafe(canonicalBase, canonicalDir)) {
+    return { success: false, error: 'Invalid skill name' };
+  }
+
+  try {
+    await rm(canonicalDir, { recursive: true, force: true });
     return { success: true };
   } catch (error) {
     return {

@@ -5,7 +5,7 @@
 
 import { VERSION, REGISTRY_URL, RESET, BOLD, DIM, CYAN, GREEN, YELLOW, RED, GRAY, agents, AGENTS_DIR, SKILLS_SUBDIR, POPULAR_AGENTS, type AgentType } from './constants.ts';
 import { api, APIError, type Skill, type RepoSkill } from './api.ts';
-import { installSkill, installSkillFromDir, detectInstalledAgents, listInstalledSkills, removeSkill, sanitizeName, type InstallMode } from './installer.ts';
+import { installSkill, installSkillFromDir, detectInstalledAgents, listInstalledSkills, removeSkill, removeCanonicalSkill, sanitizeName, type InstallMode } from './installer.ts';
 import { getAvailableUpdate, selfUpdate } from './updater.ts';
 import { getPreferredAgents, savePreferredAgents } from './config.ts';
 import { loadCredentials, saveCredentials, clearCredentials, maskToken } from './credentials.ts';
@@ -15,7 +15,7 @@ import { discoverSkills, filterSkills, type DiscoveredSkill } from './discover.t
 import { getCollectionInstallRefs } from './collection.ts';
 import { cloneRepo, cleanupTempDir, GitCloneError } from './git.ts';
 import { addSkillToLock, removeSkillFromLock, fetchSkillFolderHash, saveLastSelectedAgents, getLastSelectedAgents, getAllLockedSkills } from './lock.ts';
-import { resolveRemoveTarget } from './remove-target.ts';
+import { resolveRemoveTarget, isPathLikeRemoveTarget } from './remove-target.ts';
 import { join } from 'path';
 import { homedir } from 'os';
 import * as p from '@clack/prompts';
@@ -1931,6 +1931,7 @@ async function runRemove(args: string[]): Promise<void> {
   const options = parseRemoveOptions(args);
   const { skillName } = options;
   const isGlobal = options.global;
+  const isPathLikeTarget = isPathLikeRemoveTarget(skillName);
 
   if (!skillName) {
     if (options.json) {
@@ -1958,32 +1959,52 @@ async function runRemove(args: string[]): Promise<void> {
   const spinner = createSpinner(options.json);
   spinner.start('Loading installed skills...');
 
-  const installedSkills = await listInstalledSkills({ global: isGlobal });
+  const installedSkillsScope = isGlobal ? true : isPathLikeTarget ? undefined : false;
+  const installedSkills = await listInstalledSkills({ global: installedSkillsScope });
   const resolvedTarget = resolveRemoveTarget(skillName, installedSkills, process.cwd());
+
+  let globalScopeHint = '';
+  if (!resolvedTarget && !isGlobal && !isPathLikeTarget) {
+    const globalInstalledSkills = await listInstalledSkills({ global: true });
+    const matchedGlobalTarget = resolveRemoveTarget(skillName, globalInstalledSkills, process.cwd());
+    if (matchedGlobalTarget) {
+      globalScopeHint = `Skill "${skillName}" is installed globally. Use --global (-g) to remove it.`;
+    }
+  }
 
   if (!resolvedTarget) {
     spinner.stop('No matching skill found');
 
+    const notFoundMessage = `Skill "${skillName}" not found`;
+    const combinedMessage = globalScopeHint
+      ? `${notFoundMessage}. ${globalScopeHint}`
+      : notFoundMessage;
+
     if (options.json) {
       printJson({
-        ok: true,
+        ok: false,
         skill: skillName,
         scope: isGlobal ? 'global' : 'project',
         requestedAgents: scopedAgents.map(toAgentOutput),
         removedAgents: [],
         skippedAgents: scopedAgents.map(toAgentOutput),
-        failed: [],
-        message: `Skill \"${skillName}\" not found`,
+        failed: [{ agent: 'unknown', error: combinedMessage }],
+        message: combinedMessage,
+        hint: globalScopeHint || undefined,
       });
-      return;
+      process.exit(1);
     }
 
-    p.log.info(`Skill "${skillName}" not found`);
+    p.log.info(notFoundMessage);
+    if (globalScopeHint) {
+      p.log.info(globalScopeHint);
+    }
     p.outro('');
-    return;
+    process.exit(1);
   }
 
   const resolvedSkillName = resolvedTarget.skillName;
+  const effectiveGlobalScope = isGlobal || (isPathLikeTarget && resolvedTarget.scope === 'global');
 
   const installedAgents = scopedAgents.length > 0
     ? scopedAgents
@@ -1992,33 +2013,84 @@ async function runRemove(args: string[]): Promise<void> {
   spinner.stop(`Found ${installedAgents.length} agent(s)`);
 
   // Find which agents have this skill
-  const skillEntry = installedSkills.find((skill) => skill.name === resolvedSkillName);
-  const agentsWithSkill = (skillEntry?.agents || []).filter((agent) => installedAgents.includes(agent));
+  const agentsWithSkill = resolvedTarget.agents.filter((agent) => installedAgents.includes(agent));
 
   if (agentsWithSkill.length === 0) {
+    if (resolvedTarget.agents.length === 0) {
+      const orphanRemoval = await removeCanonicalSkill(resolvedSkillName, { global: effectiveGlobalScope });
+
+      if (orphanRemoval.success) {
+        await removeSkillFromLock(resolvedSkillName).catch(() => {
+          // Non-critical: lock cleanup failure shouldn't fail removal
+        });
+
+        if (options.json) {
+          printJson({
+            ok: true,
+            skill: resolvedSkillName,
+            scope: effectiveGlobalScope ? 'global' : 'project',
+            requestedAgents: installedAgents.map(toAgentOutput),
+            removedAgents: [],
+            skippedAgents: installedAgents.map(toAgentOutput),
+            failed: [],
+            message: `Removed orphan skill directory \"${resolvedSkillName}\"`,
+          });
+          return;
+        }
+
+        p.outro(pc.green(`Removed orphan skill directory ${resolvedSkillName}`));
+        return;
+      }
+
+      if (options.json) {
+        printJson({
+          ok: false,
+          skill: resolvedSkillName,
+          scope: effectiveGlobalScope ? 'global' : 'project',
+          requestedAgents: installedAgents.map(toAgentOutput),
+          removedAgents: [],
+          skippedAgents: installedAgents.map(toAgentOutput),
+          failed: [{ agent: 'unknown', error: orphanRemoval.error || 'Failed to remove orphan directory' }],
+          message: `Failed to remove orphan skill directory \"${resolvedSkillName}\"`,
+        });
+        process.exit(1);
+      }
+
+      p.log.error(`Failed to remove orphan skill directory "${resolvedSkillName}"`);
+      if (orphanRemoval.error) {
+        console.log(`  ${pc.dim(orphanRemoval.error)}`);
+      }
+      p.outro('');
+      process.exit(1);
+    }
+
     if (options.json) {
+      const notFoundForRequestedAgentsMessage = `Skill "${resolvedSkillName}" not found for requested agents`;
       printJson({
-        ok: true,
+        ok: false,
         skill: resolvedSkillName,
-        scope: isGlobal ? 'global' : 'project',
+        scope: effectiveGlobalScope ? 'global' : 'project',
         requestedAgents: installedAgents.map(toAgentOutput),
         removedAgents: [],
         skippedAgents: installedAgents.map(toAgentOutput),
-        failed: [],
-        message: `Skill "${resolvedSkillName}" not found for requested agents`,
+        failed: installedAgents.map((agent) => ({
+          agent: toAgentOutput(agent),
+          error: notFoundForRequestedAgentsMessage,
+        })),
+        message: notFoundForRequestedAgentsMessage,
       });
-      return;
+      process.exit(1);
     }
 
     p.log.info(`Skill "${resolvedSkillName}" not found for requested agents`);
     p.outro('');
-    return;
+    process.exit(1);
   }
 
   // Confirm removal
   if (!options.json) {
     const confirmed = await p.confirm({
-      message: `Remove ${pc.cyan(skillName)} from ${agentsWithSkill.length} agent(s)?`,
+      message: `Remove ${pc.cyan(resolvedSkillName)} from ${agentsWithSkill.length} agent(s)?`,
     });
 
     if (p.isCancel(confirmed) || !confirmed) {
@@ -2033,7 +2105,7 @@ async function runRemove(args: string[]): Promise<void> {
   const failedRemovals: Array<{ agent: AgentType; error: string }> = [];
 
   for (const agent of agentsWithSkill) {
-    const result = await removeSkill(resolvedSkillName, agent, { global: isGlobal });
+    const result = await removeSkill(resolvedSkillName, agent, { global: effectiveGlobalScope });
     if (result.success) {
       removedAgents.push(agent);
     } else {
@@ -2058,7 +2130,7 @@ async function runRemove(args: string[]): Promise<void> {
     printJson({
       ok: failedRemovals.length === 0,
       skill: resolvedSkillName,
-      scope: isGlobal ? 'global' : 'project',
+      scope: effectiveGlobalScope ? 'global' : 'project',
       requestedAgents: installedAgents.map(toAgentOutput),
       removedAgents: removedAgents.map(toAgentOutput),
       skippedAgents: skippedAgents.map(toAgentOutput),
