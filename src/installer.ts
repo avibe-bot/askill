@@ -458,6 +458,9 @@ async function hasAnyAgentSkillReference(
   globalScope: boolean,
   cwd: string
 ): Promise<boolean> {
+  const canonicalBase = getCanonicalSkillsDir(globalScope, cwd);
+  const canonicalSkillDir = normalize(resolve(join(canonicalBase, sanitizedSkillName)));
+
   for (const agentConfig of Object.values(agents)) {
     if (globalScope && !agentConfig.globalSkillsDir) {
       continue;
@@ -469,6 +472,13 @@ async function hasAnyAgentSkillReference(
     const agentSkillDir = join(agentBase, sanitizedSkillName);
 
     if (!isPathSafe(agentBase, agentSkillDir)) {
+      continue;
+    }
+
+    const resolvedAgentSkillDir = normalize(resolve(agentSkillDir));
+    if (resolvedAgentSkillDir === canonicalSkillDir) {
+      // Some agents use the canonical skills directory directly.
+      // That path should not be considered an independent reference.
       continue;
     }
 

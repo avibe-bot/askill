@@ -47,6 +47,16 @@ version: 1.0.0
   },
 };
 
+const skillCatalog = Object.values(skills).map((skill) => skill.meta);
+
+function parsePositiveInt(value, fallback) {
+  const parsed = Number.parseInt(value || '', 10);
+  if (Number.isFinite(parsed) && parsed > 0) {
+    return parsed;
+  }
+  return fallback;
+}
+
 function json(res, status, body) {
   res.writeHead(status, { 'content-type': 'application/json' });
   res.end(JSON.stringify(body));
@@ -76,6 +86,44 @@ const server = createServer((req, res) => {
         { id: 102, skillName: 'beta-collection-skill', description: 'Beta skill from shared collection', repoOwner: 'mock', repoName: 'skills', filePath: 'beta/SKILL.md', tags: ['collection', 'beta'], installRef: '@mock/beta' },
         { id: 103, skillName: 'broken-entry', description: 'This entry intentionally fails to resolve', repoOwner: 'mock', repoName: 'skills', filePath: 'broken/SKILL.md', tags: ['collection'], installRef: '@mock/missing' },
       ],
+    });
+    return;
+  }
+
+  if (path === '/api/v1/skills') {
+    const query = (url.searchParams.get('q') || '').trim().toLowerCase();
+    const page = parsePositiveInt(url.searchParams.get('page'), 1);
+    const limit = parsePositiveInt(url.searchParams.get('limit'), 20);
+
+    const filtered = query
+      ? skillCatalog.filter((skill) => {
+          const haystack = [
+            skill.name,
+            skill.description,
+            skill.owner,
+            skill.repo,
+            ...(Array.isArray(skill.tags) ? skill.tags : []),
+          ]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase();
+          return haystack.includes(query);
+        })
+      : skillCatalog;
+
+    const total = filtered.length;
+    const totalPages = total === 0 ? 0 : Math.ceil(total / limit);
+    const start = (page - 1) * limit;
+    const data = filtered.slice(start, start + limit);
+
+    json(res, 200, {
+      data,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+      },
     });
     return;
   }

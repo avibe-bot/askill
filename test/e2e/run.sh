@@ -446,9 +446,11 @@ test_install_then_remove() {
     return
   fi
 
-  # Remove (pipe yes for confirmation)
+  # Remove (non-interactive JSON mode)
   local output
-  output=$(cd "$WORKSPACE" && echo "y" | $CLI remove discover-a-skill 2>&1) || true
+  output=$(cd "$WORKSPACE" && $CLI remove discover-a-skill --json 2>&1) || true
+
+  assert_contains "$output" '"ok": true' "remove --json succeeds"
 
   # Verify removed
   if [ ! -e "$WORKSPACE/.claude/skills/discover-a-skill" ]; then
@@ -822,6 +824,167 @@ test_info() {
   assert_contains "$output" "Owner" "info shows Owner"
   assert_contains "$output" "Repository" "info shows Repository"
   assert_contains "$output" "Install" "info shows Install"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Product lifecycle (CLI-only)
+# ════════════════════════════════════════════════════
+test_product_lifecycle_cli_only() {
+  header "Product lifecycle (CLI-only)"
+  clean_workspace
+
+  start_mock_registry || return
+
+  local registry_url="http://127.0.0.1:${MOCK_REGISTRY_PORT}"
+  local api_url="${registry_url}/api/v1"
+
+  local before_output
+  before_output=$(cd "$WORKSPACE" && ASKILL_REGISTRY_URL="$registry_url" ASKILL_API_BASE_URL="$api_url" $CLI list --json 2>&1) || true
+
+  if echo "$before_output" | node -e '
+    const fs = require("fs");
+    const data = JSON.parse(fs.readFileSync(0, "utf8"));
+    if (data.ok !== true) process.exit(1);
+    if (data.count !== 0) process.exit(1);
+    if (!Array.isArray(data.skills) || data.skills.length !== 0) process.exit(1);
+  '; then
+    pass "lifecycle starts from empty local state"
+  else
+    fail "lifecycle precondition failed (list should be empty)"
+    echo "$before_output" | strip_ansi | head -10 | sed 's/^/    /'
+    stop_mock_registry
+    return
+  fi
+
+  local explore_output
+  explore_output=$(cd "$WORKSPACE" && ASKILL_REGISTRY_URL="$registry_url" ASKILL_API_BASE_URL="$api_url" $CLI find alpha --json 2>&1) || true
+
+  if echo "$explore_output" | node -e '
+    const fs = require("fs");
+    const data = JSON.parse(fs.readFileSync(0, "utf8"));
+    if (data.ok !== true) process.exit(1);
+    if (data.query !== "alpha") process.exit(1);
+    if (!Array.isArray(data.skills) || data.skills.length < 1) process.exit(1);
+    const target = data.skills.find((skill) => skill.name === "alpha-collection-skill");
+    if (!target) process.exit(1);
+    if (target.owner !== "mock" || target.repo !== "skills") process.exit(1);
+    if (target.installSource !== "gh:mock/skills@alpha-collection-skill") process.exit(1);
+  '; then
+    pass "find --json discovers installable skill"
+  else
+    fail "find --json did not return expected discoverability payload"
+    echo "$explore_output" | strip_ansi | head -10 | sed 's/^/    /'
+    stop_mock_registry
+    return
+  fi
+
+  local info_output
+  info_output=$(cd "$WORKSPACE" && ASKILL_REGISTRY_URL="$registry_url" ASKILL_API_BASE_URL="$api_url" $CLI info @mock/alpha 2>&1) || true
+
+  assert_contains "$info_output" "alpha-collection-skill" "info shows skill name"
+  assert_contains "$info_output" "Owner" "info shows owner label"
+  assert_contains "$info_output" "mock" "info shows owner value"
+  assert_contains "$info_output" "Repository" "info shows repository label"
+  assert_contains "$info_output" "mock/skills" "info shows repository value"
+  assert_contains "$info_output" "askill install gh:mock/skills@alpha-collection-skill" "info shows install command"
+
+  local install_output
+  install_output=$(cd "$WORKSPACE" && ASKILL_REGISTRY_URL="$registry_url" ASKILL_API_BASE_URL="$api_url" $CLI add @mock/alpha -a claude-code -y --json 2>&1) || true
+
+  if echo "$install_output" | node -e '
+    const fs = require("fs");
+    const data = JSON.parse(fs.readFileSync(0, "utf8"));
+    if (data.ok !== true) process.exit(1);
+    if (data.action !== "install") process.exit(1);
+    if (!data.summary || data.summary.failed !== 0) process.exit(1);
+    if (!Array.isArray(data.results) || data.results.length < 1) process.exit(1);
+    const installed = data.results.find((result) => result.skill === "alpha-collection-skill" && result.success === true);
+    if (!installed) process.exit(1);
+    if (!installed.agent || installed.agent.id !== "claude-code") process.exit(1);
+  '; then
+    pass "add --json installs selected skill"
+  else
+    fail "add --json install payload mismatch in lifecycle"
+    echo "$install_output" | strip_ansi | head -10 | sed 's/^/    /'
+    stop_mock_registry
+    return
+  fi
+
+  local after_install_output
+  after_install_output=$(cd "$WORKSPACE" && ASKILL_REGISTRY_URL="$registry_url" ASKILL_API_BASE_URL="$api_url" $CLI list --json 2>&1) || true
+
+  if echo "$after_install_output" | node -e '
+    const fs = require("fs");
+    const data = JSON.parse(fs.readFileSync(0, "utf8"));
+    if (data.ok !== true) process.exit(1);
+    if (!Array.isArray(data.skills) || data.skills.length < 1) process.exit(1);
+    const target = data.skills.find((skill) => skill.name === "alpha-collection-skill");
+    if (!target) process.exit(1);
+    if (target.scope !== "project") process.exit(1);
+    if (typeof target.path !== "string" || target.path.length === 0) process.exit(1);
+    if (!Array.isArray(target.agents) || !target.agents.some((agent) => agent.id === "claude-code")) process.exit(1);
+  '; then
+    pass "list --json shows installed skill state"
+  else
+    fail "list --json missing installed skill in lifecycle"
+    echo "$after_install_output" | strip_ansi | head -10 | sed 's/^/    /'
+    stop_mock_registry
+    return
+  fi
+
+  local installed_path
+  installed_path=$(echo "$after_install_output" | node -e '
+    const fs = require("fs");
+    const data = JSON.parse(fs.readFileSync(0, "utf8"));
+    const target = (data.skills || []).find((skill) => skill.name === "alpha-collection-skill");
+    if (target && typeof target.path === "string") {
+      process.stdout.write(target.path);
+    }
+  ')
+
+  if [ -z "$installed_path" ]; then
+    fail "could not derive installed skill path from list --json"
+    stop_mock_registry
+    return
+  fi
+
+  local remove_output
+  remove_output=$(cd "$WORKSPACE" && ASKILL_REGISTRY_URL="$registry_url" ASKILL_API_BASE_URL="$api_url" $CLI remove "$installed_path" --json 2>&1) || true
+
+  if echo "$remove_output" | node -e '
+    const fs = require("fs");
+    const data = JSON.parse(fs.readFileSync(0, "utf8"));
+    if (data.ok !== true) process.exit(1);
+    if (data.skill !== "alpha-collection-skill") process.exit(1);
+    if (!Array.isArray(data.removedAgents) || data.removedAgents.length !== 1) process.exit(1);
+    if (!data.removedAgents[0] || data.removedAgents[0].id !== "claude-code") process.exit(1);
+    if (!Array.isArray(data.failed) || data.failed.length !== 0) process.exit(1);
+  '; then
+    pass "remove --json removes skill by installed path"
+  else
+    fail "remove --json path removal payload mismatch"
+    echo "$remove_output" | strip_ansi | head -10 | sed 's/^/    /'
+    stop_mock_registry
+    return
+  fi
+
+  local final_output
+  final_output=$(cd "$WORKSPACE" && ASKILL_REGISTRY_URL="$registry_url" ASKILL_API_BASE_URL="$api_url" $CLI list --json 2>&1) || true
+
+  if echo "$final_output" | node -e '
+    const fs = require("fs");
+    const data = JSON.parse(fs.readFileSync(0, "utf8"));
+    if (data.ok !== true) process.exit(1);
+    if (data.count !== 0) process.exit(1);
+    if (!Array.isArray(data.skills) || data.skills.length !== 0) process.exit(1);
+  '; then
+    pass "lifecycle ends with empty state after removal"
+  else
+    fail "final list state mismatch after lifecycle remove"
+    echo "$final_output" | strip_ansi | head -10 | sed 's/^/    /'
+  fi
+
+  stop_mock_registry
 }
 
 
@@ -2315,6 +2478,7 @@ ALL_TESTS=(
   test_help_flags
   test_search
   test_info
+  test_product_lifecycle_cli_only
 )
 
 # List mode
