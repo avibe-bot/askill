@@ -92,6 +92,7 @@ clean_workspace() {
   rm -rf "$WORKSPACE"/.claude "$WORKSPACE"/.cursor "$WORKSPACE"/.opencode
   rm -rf "$WORKSPACE"/.agents
   rm -rf /root/.claude/skills /root/.cursor/skills /root/.opencode/skills
+  rm -rf /root/.agents
   rm -rf /root/.config/askill
   rm -rf /root/.askill
   mkdir -p "$WORKSPACE"
@@ -1045,8 +1046,8 @@ test_lock_file_remove() {
   before=$(cat /root/.agents/.skill-lock.json)
   assert_contains "$before" '"discover-a-skill"' "skill in lock before removal"
 
-  # Remove
-  cd "$WORKSPACE" && echo "y" | $CLI remove discover-a-skill >/dev/null 2>&1 || true
+  # Remove (non-interactive JSON mode)
+  cd "$WORKSPACE" && $CLI remove discover-a-skill --json >/dev/null 2>&1 || true
 
   # Verify skill is removed from lock but file still exists
   if [ -f "/root/.agents/.skill-lock.json" ]; then
@@ -1886,7 +1887,7 @@ test_remove_global() {
 
   # Remove globally
   local output
-  output=$(cd "$WORKSPACE" && echo "y" | $CLI remove discover-a-skill -g 2>&1) || true
+  output=$(cd "$WORKSPACE" && $CLI remove discover-a-skill -g --json 2>&1) || true
 
   # Verify removed
   if [ ! -e "/root/.claude/skills/discover-a-skill" ]; then
@@ -2263,6 +2264,98 @@ test_remove_json_invalid_agent() {
 }
 
 # ════════════════════════════════════════════════════
+# Test: Remove not found suggests --global when applicable
+# ════════════════════════════════════════════════════
+test_remove_suggests_global_scope() {
+  header "Remove suggests --global"
+  clean_workspace
+
+  cd "$WORKSPACE" && $CLI add /app/skills/discover-a-skill -a claude-code -g -y >/dev/null 2>&1 || true
+
+  local output
+  local code=0
+  output=$(cd "$WORKSPACE" && $CLI remove discover-a-skill 2>&1) || code=$?
+
+  if [ "$code" -eq 1 ]; then
+    pass "remove exits non-zero when project skill is missing"
+  else
+    fail "remove should fail when skill is only installed globally (exit=$code)"
+  fi
+
+  assert_contains "$output" "Skill \"discover-a-skill\" not found" "remove reports not found in current scope"
+  assert_contains "$output" "Use --global (-g) to remove it" "remove suggests global scope flag"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Remove --json not found payload semantics
+# ════════════════════════════════════════════════════
+test_remove_json_not_found_semantics() {
+  header "Remove --json not found semantics"
+  clean_workspace
+
+  local output
+  local code=0
+  output=$(cd "$WORKSPACE" && $CLI remove not-installed-skill --json 2>&1) || code=$?
+
+  if [ "$code" -eq 1 ]; then
+    pass "remove --json returns non-zero when skill is not installed"
+  else
+    fail "remove --json should fail when skill is not installed (exit=$code)"
+  fi
+
+  if echo "$output" | node -e '
+    const fs = require("fs");
+    const data = JSON.parse(fs.readFileSync(0, "utf8"));
+    if (data.ok !== false) process.exit(1);
+    if (data.skill !== "not-installed-skill") process.exit(1);
+    if (!Array.isArray(data.failed) || data.failed.length !== 1) process.exit(1);
+    if (!data.failed[0] || typeof data.failed[0].error !== "string") process.exit(1);
+    if (!data.failed[0].error.includes("not found")) process.exit(1);
+    if (typeof data.message !== "string" || !data.message.includes("not found")) process.exit(1);
+  '; then
+    pass "remove --json reports not found as structured failure"
+  else
+    fail "remove --json not found payload mismatch"
+    echo "$output" | strip_ansi | head -10 | sed 's/^/    /'
+  fi
+}
+
+# ════════════════════════════════════════════════════
+# Test: Remove --json suggests global scope when needed
+# ════════════════════════════════════════════════════
+test_remove_json_suggests_global_scope() {
+  header "Remove --json suggests --global"
+  clean_workspace
+
+  cd "$WORKSPACE" && $CLI add /app/skills/discover-a-skill -a claude-code -g -y >/dev/null 2>&1 || true
+
+  local output
+  local code=0
+  output=$(cd "$WORKSPACE" && $CLI remove discover-a-skill --json 2>&1) || code=$?
+
+  if [ "$code" -eq 1 ]; then
+    pass "remove --json exits non-zero when only global install exists"
+  else
+    fail "remove --json should fail without -g for global-only install (exit=$code)"
+  fi
+
+  if echo "$output" | node -e '
+    const fs = require("fs");
+    const data = JSON.parse(fs.readFileSync(0, "utf8"));
+    if (data.ok !== false) process.exit(1);
+    if (data.scope !== "project") process.exit(1);
+    if (!Array.isArray(data.failed) || data.failed.length !== 1) process.exit(1);
+    if (typeof data.message !== "string" || !data.message.includes("Use --global (-g)")) process.exit(1);
+    if (typeof data.hint !== "string" || !data.hint.includes("Use --global (-g)")) process.exit(1);
+  '; then
+    pass "remove --json includes global scope hint"
+  else
+    fail "remove --json global hint payload mismatch"
+    echo "$output" | strip_ansi | head -10 | sed 's/^/    /'
+  fi
+}
+
+# ════════════════════════════════════════════════════
 # Test: Find --json machine-readable output
 # ════════════════════════════════════════════════════
 test_find_json_output() {
@@ -2348,7 +2441,7 @@ test_command_aliases() {
   fi
 
   # Test 'rm' as alias for 'remove'
-  output=$(cd "$WORKSPACE" && echo "y" | $CLI rm discover-a-skill 2>&1) || true
+  output=$(cd "$WORKSPACE" && $CLI rm discover-a-skill --json 2>&1) || true
   if [ ! -e "$WORKSPACE/.claude/skills/discover-a-skill" ]; then
     pass "alias 'rm' works for remove"
   else
@@ -2468,6 +2561,9 @@ ALL_TESTS=(
   test_remove_json_agent_filter
   test_remove_json_missing_skill
   test_remove_json_invalid_agent
+  test_remove_suggests_global_scope
+  test_remove_json_not_found_semantics
+  test_remove_json_suggests_global_scope
   test_add_json_preview_and_install
   test_add_json_invalid_agent
   test_add_json_requires_selection

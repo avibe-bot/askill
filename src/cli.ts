@@ -1963,26 +1963,44 @@ async function runRemove(args: string[]): Promise<void> {
   const installedSkills = await listInstalledSkills({ global: installedSkillsScope });
   const resolvedTarget = resolveRemoveTarget(skillName, installedSkills, process.cwd());
 
+  let globalScopeHint = '';
+  if (!resolvedTarget && !isGlobal && !isPathLikeTarget) {
+    const globalInstalledSkills = await listInstalledSkills({ global: true });
+    const matchedGlobalTarget = resolveRemoveTarget(skillName, globalInstalledSkills, process.cwd());
+    if (matchedGlobalTarget) {
+      globalScopeHint = `Skill "${skillName}" is installed globally. Use --global (-g) to remove it.`;
+    }
+  }
+
   if (!resolvedTarget) {
     spinner.stop('No matching skill found');
 
+    const notFoundMessage = `Skill "${skillName}" not found`;
+    const combinedMessage = globalScopeHint
+      ? `${notFoundMessage}. ${globalScopeHint}`
+      : notFoundMessage;
+
     if (options.json) {
       printJson({
-        ok: true,
+        ok: false,
         skill: skillName,
         scope: isGlobal ? 'global' : 'project',
         requestedAgents: scopedAgents.map(toAgentOutput),
         removedAgents: [],
         skippedAgents: scopedAgents.map(toAgentOutput),
-        failed: [],
-        message: `Skill \"${skillName}\" not found`,
+        failed: [{ agent: 'unknown', error: combinedMessage }],
+        message: combinedMessage,
+        hint: globalScopeHint || undefined,
       });
-      return;
+      process.exit(1);
     }
 
-    p.log.info(`Skill "${skillName}" not found`);
+    p.log.info(notFoundMessage);
+    if (globalScopeHint) {
+      p.log.info(globalScopeHint);
+    }
     p.outro('');
-    return;
+    process.exit(1);
   }
 
   const resolvedSkillName = resolvedTarget.skillName;
@@ -2047,22 +2065,26 @@ async function runRemove(args: string[]): Promise<void> {
     }
 
     if (options.json) {
+      const notFoundForRequestedAgentsMessage = `Skill "${resolvedSkillName}" not found for requested agents`;
       printJson({
-        ok: true,
+        ok: false,
         skill: resolvedSkillName,
         scope: effectiveGlobalScope ? 'global' : 'project',
         requestedAgents: installedAgents.map(toAgentOutput),
         removedAgents: [],
         skippedAgents: installedAgents.map(toAgentOutput),
-        failed: [],
-        message: `Skill "${resolvedSkillName}" not found for requested agents`,
+        failed: installedAgents.map((agent) => ({
+          agent: toAgentOutput(agent),
+          error: notFoundForRequestedAgentsMessage,
+        })),
+        message: notFoundForRequestedAgentsMessage,
       });
-      return;
+      process.exit(1);
     }
 
     p.log.info(`Skill "${resolvedSkillName}" not found for requested agents`);
     p.outro('');
-    return;
+    process.exit(1);
   }
 
   // Confirm removal
