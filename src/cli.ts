@@ -5,7 +5,7 @@
 
 import { VERSION, REGISTRY_URL, RESET, BOLD, DIM, CYAN, GREEN, YELLOW, RED, GRAY, agents, AGENTS_DIR, SKILLS_SUBDIR, POPULAR_AGENTS, type AgentType } from './constants.ts';
 import { api, APIError, type Skill, type RepoSkill } from './api.ts';
-import { installSkill, installSkillFromDir, detectInstalledAgents, listInstalledSkills, removeSkill, sanitizeName, type InstallMode } from './installer.ts';
+import { installSkill, installSkillFromDir, detectInstalledAgents, listInstalledSkills, removeSkill, removeCanonicalSkill, sanitizeName, type InstallMode } from './installer.ts';
 import { getAvailableUpdate, selfUpdate } from './updater.ts';
 import { getPreferredAgents, savePreferredAgents } from './config.ts';
 import { loadCredentials, saveCredentials, clearCredentials, maskToken } from './credentials.ts';
@@ -1998,6 +1998,54 @@ async function runRemove(args: string[]): Promise<void> {
   const agentsWithSkill = resolvedTarget.agents.filter((agent) => installedAgents.includes(agent));
 
   if (agentsWithSkill.length === 0) {
+    if (resolvedTarget.agents.length === 0) {
+      const orphanRemoval = await removeCanonicalSkill(resolvedSkillName, { global: effectiveGlobalScope });
+
+      if (orphanRemoval.success) {
+        await removeSkillFromLock(resolvedSkillName).catch(() => {
+          // Non-critical: lock cleanup failure shouldn't fail removal
+        });
+
+        if (options.json) {
+          printJson({
+            ok: true,
+            skill: resolvedSkillName,
+            scope: effectiveGlobalScope ? 'global' : 'project',
+            requestedAgents: installedAgents.map(toAgentOutput),
+            removedAgents: [],
+            skippedAgents: installedAgents.map(toAgentOutput),
+            failed: [],
+            message: `Removed orphan skill directory \"${resolvedSkillName}\"`,
+          });
+          return;
+        }
+
+        p.outro(pc.green(`Removed orphan skill directory ${resolvedSkillName}`));
+        return;
+      }
+
+      if (options.json) {
+        printJson({
+          ok: false,
+          skill: resolvedSkillName,
+          scope: effectiveGlobalScope ? 'global' : 'project',
+          requestedAgents: installedAgents.map(toAgentOutput),
+          removedAgents: [],
+          skippedAgents: installedAgents.map(toAgentOutput),
+          failed: [{ agent: 'unknown', error: orphanRemoval.error || 'Failed to remove orphan directory' }],
+          message: `Failed to remove orphan skill directory \"${resolvedSkillName}\"`,
+        });
+        process.exit(1);
+      }
+
+      p.log.error(`Failed to remove orphan skill directory "${resolvedSkillName}"`);
+      if (orphanRemoval.error) {
+        console.log(`  ${pc.dim(orphanRemoval.error)}`);
+      }
+      p.outro('');
+      process.exit(1);
+    }
+
     if (options.json) {
       printJson({
         ok: true,
