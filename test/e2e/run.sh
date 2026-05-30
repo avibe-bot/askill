@@ -2343,6 +2343,53 @@ SKILL
 }
 
 # ════════════════════════════════════════════════════
+# Test: Add --skill selector for registry refs inside collections
+# ════════════════════════════════════════════════════
+test_add_skill_selector_collection_registry_refs() {
+  header "Add --skill selector (collection registry refs)"
+  clean_workspace
+
+  start_mock_registry || return
+
+  local registry_url="http://127.0.0.1:${MOCK_REGISTRY_PORT}"
+  local api_url="${registry_url}/api/v1"
+
+  local output
+  output=$(cd "$WORKSPACE" && ASKILL_REGISTRY_URL="$registry_url" ASKILL_API_BASE_URL="$api_url" $CLI add col:mock/dev-tools--grp123 --skill beta-collection-skill -a claude-code -y --json 2>&1) || true
+  if echo "$output" | node -e '
+    const fs = require("fs");
+    const data = JSON.parse(fs.readFileSync(0, "utf8"));
+    if (data.ok !== true) process.exit(1);
+    if (!Array.isArray(data.requestedSkills) || data.requestedSkills.length !== 1) process.exit(1);
+    if (data.requestedSkills[0].name !== "beta-collection-skill") process.exit(1);
+    if (!Array.isArray(data.results) || data.results.length !== 1) process.exit(1);
+    if (!data.results.every((result) => result.skill === "beta-collection-skill" && result.success === true)) process.exit(1);
+  '; then
+    pass "add --skill filters registry-backed collection refs"
+  else
+    fail "add --skill collection selector payload mismatch"
+    echo "$output" | strip_ansi | head -10 | sed 's/^/    /'
+  fi
+
+  if [ -e "$WORKSPACE/.claude/skills/beta-collection-skill" ] && [ ! -e "$WORKSPACE/.claude/skills/alpha-collection-skill" ]; then
+    pass "add --skill only installs selected collection skill"
+  else
+    fail "add --skill installed unexpected collection skills"
+  fi
+
+  if [ -f "$PROJECT_LOCK" ]; then
+    local lock
+    lock=$(cat "$PROJECT_LOCK")
+    assert_contains "$lock" '"@mock/beta"' "lock records selected collection registry source"
+    assert_not_contains "$lock" '"@mock/alpha"' "lock excludes unselected collection registry source"
+  else
+    fail "lock file missing after selected collection install"
+  fi
+
+  stop_mock_registry
+}
+
+# ════════════════════════════════════════════════════
 # Test: Re-link canonical installed skill to another agent
 # ════════════════════════════════════════════════════
 test_add_canonical_path_relinks_agent() {
@@ -2384,6 +2431,52 @@ test_add_canonical_path_relinks_agent() {
   else
     fail "canonical path relink changed existing lock metadata"
   fi
+}
+
+# ════════════════════════════════════════════════════
+# Test: Registry checks/updates in interactive CLI mode
+# ════════════════════════════════════════════════════
+test_registry_interactive_check_update() {
+  header "Registry interactive check/update"
+  clean_workspace
+
+  start_mock_registry || return
+
+  local registry_url="http://127.0.0.1:${MOCK_REGISTRY_PORT}"
+  local api_url="${registry_url}/api/v1"
+
+  cd "$WORKSPACE" && ASKILL_REGISTRY_URL="$registry_url" ASKILL_API_BASE_URL="$api_url" $CLI add @mock/beta -a claude-code -y >/dev/null 2>&1 || true
+  node -e '
+    const fs = require("fs");
+    const path = process.argv[1];
+    const content = fs.readFileSync(path, "utf8");
+    fs.writeFileSync(path, content.replace("version: 1.0.0", "version: 1.0.0-alpha.1"));
+  ' "$WORKSPACE/.agents/skills/beta-collection-skill/SKILL.md"
+
+  local check_output
+  check_output=$(cd "$WORKSPACE" && ASKILL_REGISTRY_URL="$registry_url" ASKILL_API_BASE_URL="$api_url" $CLI check 2>&1) || true
+  assert_contains "$check_output" "1 skill(s) have updates available" "interactive check detects registry version update"
+  assert_contains "$check_output" "beta-collection-skill" "interactive check names registry skill"
+  assert_contains "$check_output" "1.0.0-alpha.1 → 1.0.0" "interactive check compares prerelease below stable"
+
+  local update_output
+  update_output=$(cd "$WORKSPACE" && ASKILL_REGISTRY_URL="$registry_url" ASKILL_API_BASE_URL="$api_url" $CLI update -y 2>&1) || true
+  assert_contains "$update_output" "Updated 1 skill(s)" "interactive update refreshes registry skill"
+
+  local updated_version
+  updated_version=$(node -e '
+    const fs = require("fs");
+    const content = fs.readFileSync(process.argv[1], "utf8");
+    const match = content.match(/^version:\s*(.+)$/m);
+    process.stdout.write(match ? match[1].trim() : "");
+  ' "$WORKSPACE/.agents/skills/beta-collection-skill/SKILL.md")
+  if [ "$updated_version" = "1.0.0" ]; then
+    pass "interactive update writes latest registry SKILL.md"
+  else
+    fail "interactive update did not refresh registry skill version"
+  fi
+
+  stop_mock_registry
 }
 
 # ════════════════════════════════════════════════════
@@ -2687,7 +2780,7 @@ test_dashboard_json_contracts() {
     const fs = require("fs");
     const path = process.argv[1];
     const content = fs.readFileSync(path, "utf8");
-    fs.writeFileSync(path, content.replace("version: 1.0.0", "version: 0.9.0"));
+    fs.writeFileSync(path, content.replace("version: 1.0.0", "version: 1.0.0-alpha.1"));
   ' "$WORKSPACE/.agents/skills/alpha-collection-skill/SKILL.md"
 
   local check_output
@@ -2700,7 +2793,7 @@ test_dashboard_json_contracts() {
     const target = (data.skills || []).find((skill) => skill.name === "alpha-collection-skill");
     if (!target || target.status !== "update_available") process.exit(1);
     if (target.sourceType !== "registry") process.exit(1);
-    if (target.localVersion !== "0.9.0" || target.remoteVersion !== "1.0.0") process.exit(1);
+    if (target.localVersion !== "1.0.0-alpha.1" || target.remoteVersion !== "1.0.0") process.exit(1);
   '; then
     pass "check --json detects registry version updates"
   else
@@ -2719,7 +2812,7 @@ test_dashboard_json_contracts() {
     if (!data.summary || data.summary.checked !== 1 || data.summary.updated !== 1) process.exit(1);
     const target = (data.results || []).find((result) => result.skill === "alpha-collection-skill");
     if (!target || target.status !== "updated" || target.checkStatus !== "update_available") process.exit(1);
-    if (target.localVersion !== "0.9.0" || target.remoteVersion !== "1.0.0") process.exit(1);
+    if (target.localVersion !== "1.0.0-alpha.1" || target.remoteVersion !== "1.0.0") process.exit(1);
   '; then
     pass "update --json updates registry-sourced skills"
   else
@@ -2922,7 +3015,9 @@ ALL_TESTS=(
   test_add_json_invalid_agent
   test_add_json_requires_selection
   test_add_skill_selector_local
+  test_add_skill_selector_collection_registry_refs
   test_add_canonical_path_relinks_agent
+  test_registry_interactive_check_update
   test_find_json_output
   test_dashboard_json_contracts
   test_reinstall_skill
