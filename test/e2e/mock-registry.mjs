@@ -14,6 +14,7 @@ const skills = {
       repo: 'skills',
       path: 'alpha',
       updatedAt: '2026-03-08T00:00:00.000Z',
+      createdAt: '2026-03-01T00:00:00.000Z',
     },
     raw: `---
 name: alpha-collection-skill
@@ -35,6 +36,7 @@ version: 1.0.0
       repo: 'skills',
       path: 'beta',
       updatedAt: '2026-03-08T00:00:00.000Z',
+      createdAt: '2026-03-01T00:00:00.000Z',
     },
     raw: `---
 name: beta-collection-skill
@@ -92,11 +94,13 @@ const server = createServer((req, res) => {
 
   if (path === '/api/v1/skills') {
     const query = (url.searchParams.get('q') || '').trim().toLowerCase();
+    const tag = (url.searchParams.get('tag') || '').trim().toLowerCase();
     const page = parsePositiveInt(url.searchParams.get('page'), 1);
     const limit = parsePositiveInt(url.searchParams.get('limit'), 20);
 
-    const filtered = query
-      ? skillCatalog.filter((skill) => {
+    const filtered = skillCatalog
+      .filter((skill) => {
+        if (!query) return true;
           const haystack = [
             skill.name,
             skill.description,
@@ -108,8 +112,11 @@ const server = createServer((req, res) => {
             .join(' ')
             .toLowerCase();
           return haystack.includes(query);
-        })
-      : skillCatalog;
+      })
+      .filter((skill) => {
+        if (!tag) return true;
+        return Array.isArray(skill.tags) && skill.tags.some((value) => String(value).toLowerCase() === tag);
+      });
 
     const total = filtered.length;
     const totalPages = total === 0 ? 0 : Math.ceil(total / limit);

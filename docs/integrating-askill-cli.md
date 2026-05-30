@@ -9,13 +9,13 @@ This guide focuses on JSON mode so your product can call the CLI and consume sta
 - Works across environments where users already run `askill`
 - Reuses askill's agent compatibility logic (40+ agents)
 - Supports both project-level and global skill management
-- Keeps your product thin: UI + orchestration, while `askill` does install/remove/search/list
+- Keeps your product thin: UI + orchestration, while `askill` does search/list/info/check/install/update/remove
 
 ## JSON mode contract
 
 For supported commands, pass `--json` and parse stdout as JSON.
 
-- Supported commands: `add`, `find`, `list`, `remove`
+- Supported commands: `add`, `find`, `list`, `info`, `check`, `update`, `remove`
 - Success payload shape:
 
 ```json
@@ -51,6 +51,9 @@ Official schemas for product integrations are available in `docs/json-contracts/
 - [Add response schema](./json-contracts/add.response.schema.json)
 - [Find response schema](./json-contracts/find.response.schema.json)
 - [List response schema](./json-contracts/list.response.schema.json)
+- [Info response schema](./json-contracts/info.response.schema.json)
+- [Check response schema](./json-contracts/check.response.schema.json)
+- [Update response schema](./json-contracts/update.response.schema.json)
 - [Remove response schema](./json-contracts/remove.response.schema.json)
 - [Error response schema](./json-contracts/error.response.schema.json)
 
@@ -84,13 +87,31 @@ This lets your UI expose management by both scope and agent type.
 
 ```bash
 askill find memory --json
+
+# tag + pagination for dashboards
+askill find --tag productivity --page 1 --limit 20 --json
 ```
 
 Typical fields:
 
 - `query`
+- `filters.tag`
+- `pagination.page` / `pagination.limit` / `pagination.total` / `pagination.totalPages`
 - `count`
 - `skills[]` with `name`, `description`, `owner`, `repo`, `tags`, `stars`, `aiScore`, `installSource`
+
+### Inspect one skill
+
+```bash
+askill info gh:owner/repo@skill-name --json
+```
+
+Typical fields:
+
+- `skill` registry metadata (`name`, `description`, `owner`, `repo`, `path`, `tags`, `stars`, `installSource`)
+- `skill.frontmatter` parsed from raw `SKILL.md`
+- `skill.commands` parsed from frontmatter
+- `installed` local state with project/global installations when present
 
 ### List installed skills
 
@@ -110,7 +131,7 @@ Typical fields:
 - `filters.scope` (`all` | `project` | `global`)
 - `filters.agents[]`
 - `summary.global` / `summary.project`
-- `skills[]` with `name`, `scope`, `path`, `agents[]`
+- `skills[]` with `name`, `description`, `version`, `tags`, `scope`, `path`, `agents[]`, `source`, `installSource`, `installedAt`, `updatedAt`
 
 ### Preview install candidates (no write)
 
@@ -146,6 +167,41 @@ Typical fields:
 - `summary` (`operations`, `successful`, `failed`, `skills`, `dependencies`)
 - `results[]` (per skill + per agent)
 
+### Check update status
+
+```bash
+# project lock file
+askill check --json
+
+# one global skill
+askill check skill-name -g --json
+```
+
+Typical fields:
+
+- `scope` (`project` | `global`)
+- `requestedSkill`
+- `summary` (`total`, `updateAvailable`, `upToDate`, `uncheckable`)
+- `skills[]` with `status` (`update_available` | `up_to_date` | `uncheckable`), source metadata, hashes, and `reason`
+
+### Update skills
+
+```bash
+# non-interactive in JSON mode
+askill update --json
+
+# update one global skill
+askill update skill-name -g --json
+```
+
+Typical fields:
+
+- `action: "update"`
+- `targetAgents[]`
+- `check.summary`
+- `summary` (`checked`, `updateAvailable`, `updated`, `skipped`, `failed`)
+- `results[]` with `status` (`updated` | `skipped` | `failed`), `checkStatus`, `reason`, `error`, source metadata, hashes, and agents
+
 ### Remove skills
 
 ```bash
@@ -174,6 +230,7 @@ Common examples:
 - `INVALID_AGENTS`: invalid `-a` values
 - `INVALID_OPTIONS`: invalid option combination (for example `list -g -p`)
 - `MISSING_SKILL`: missing required skill argument in `remove`
+- `SKILL_NOT_FOUND`: `info --json` target was not found in the registry
 - `MULTIPLE_SKILLS_REQUIRE_SELECTION`: source has multiple skills but no `--all`/`--yes`
 - `UNHANDLED_ERROR`: unexpected runtime failure
 

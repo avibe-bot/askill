@@ -2511,6 +2511,119 @@ test_find_json_output() {
 }
 
 # ════════════════════════════════════════════════════
+# Test: Dashboard JSON contracts (mock registry)
+# ════════════════════════════════════════════════════
+test_dashboard_json_contracts() {
+  header "Dashboard JSON contracts"
+  clean_workspace
+
+  start_mock_registry || return
+
+  local registry_url="http://127.0.0.1:${MOCK_REGISTRY_PORT}"
+  local api_url="${registry_url}/api/v1"
+
+  local find_output
+  find_output=$(cd "$WORKSPACE" && ASKILL_REGISTRY_URL="$registry_url" ASKILL_API_BASE_URL="$api_url" $CLI find --tag collection --limit 1 --page 1 --json 2>&1) || true
+  if echo "$find_output" | node -e '
+    const fs = require("fs");
+    const data = JSON.parse(fs.readFileSync(0, "utf8"));
+    if (data.ok !== true) process.exit(1);
+    if (!data.filters || data.filters.tag !== "collection") process.exit(1);
+    if (!data.pagination || data.pagination.page !== 1 || data.pagination.limit !== 1) process.exit(1);
+    if (data.count !== 1 || !Array.isArray(data.skills) || data.skills.length !== 1) process.exit(1);
+    if (!data.skills[0].tags.includes("collection")) process.exit(1);
+  '; then
+    pass "find --json supports tag and pagination filters"
+  else
+    fail "find --json tag/pagination payload mismatch"
+    echo "$find_output" | strip_ansi | head -10 | sed 's/^/    /'
+    stop_mock_registry
+    return
+  fi
+
+  local info_output
+  info_output=$(cd "$WORKSPACE" && ASKILL_REGISTRY_URL="$registry_url" ASKILL_API_BASE_URL="$api_url" $CLI info @mock/alpha --json 2>&1) || true
+  if echo "$info_output" | node -e '
+    const fs = require("fs");
+    const data = JSON.parse(fs.readFileSync(0, "utf8"));
+    if (data.ok !== true) process.exit(1);
+    if (!data.skill || data.skill.name !== "alpha-collection-skill") process.exit(1);
+    if (data.skill.version !== "1.0.0") process.exit(1);
+    if (!data.skill.frontmatter || data.skill.frontmatter.name !== "alpha-collection-skill") process.exit(1);
+    if (!data.skill.commands || typeof data.skill.commands !== "object") process.exit(1);
+    if (!data.installed || data.installed.installed !== false) process.exit(1);
+    if (data.skill.installSource !== "gh:mock/skills@alpha-collection-skill") process.exit(1);
+  '; then
+    pass "info --json returns registry metadata and frontmatter"
+  else
+    fail "info --json payload mismatch"
+    echo "$info_output" | strip_ansi | head -10 | sed 's/^/    /'
+    stop_mock_registry
+    return
+  fi
+
+  cd "$WORKSPACE" && ASKILL_REGISTRY_URL="$registry_url" ASKILL_API_BASE_URL="$api_url" $CLI add @mock/alpha -a claude-code -y --json >/dev/null 2>&1 || true
+
+  local list_output
+  list_output=$(cd "$WORKSPACE" && ASKILL_REGISTRY_URL="$registry_url" ASKILL_API_BASE_URL="$api_url" $CLI list --json 2>&1) || true
+  if echo "$list_output" | node -e '
+    const fs = require("fs");
+    const data = JSON.parse(fs.readFileSync(0, "utf8"));
+    const target = (data.skills || []).find((skill) => skill.name === "alpha-collection-skill");
+    if (!target) process.exit(1);
+    if (target.description !== "Alpha skill from shared collection") process.exit(1);
+    if (target.version !== "1.0.0") process.exit(1);
+    if (target.installSource !== "@mock/alpha") process.exit(1);
+    if (!target.source || target.source.type !== "registry") process.exit(1);
+    if (typeof target.updatedAt !== "string") process.exit(1);
+  '; then
+    pass "list --json includes dashboard metadata"
+  else
+    fail "list --json dashboard metadata mismatch"
+    echo "$list_output" | strip_ansi | head -10 | sed 's/^/    /'
+    stop_mock_registry
+    return
+  fi
+
+  local check_output
+  check_output=$(cd "$WORKSPACE" && ASKILL_REGISTRY_URL="$registry_url" ASKILL_API_BASE_URL="$api_url" $CLI check --json 2>&1) || true
+  if echo "$check_output" | node -e '
+    const fs = require("fs");
+    const data = JSON.parse(fs.readFileSync(0, "utf8"));
+    if (data.ok !== true || data.scope !== "project") process.exit(1);
+    if (!data.summary || data.summary.total !== 1 || data.summary.uncheckable !== 1) process.exit(1);
+    const target = (data.skills || []).find((skill) => skill.name === "alpha-collection-skill");
+    if (!target || target.status !== "uncheckable") process.exit(1);
+    if (target.sourceType !== "registry") process.exit(1);
+  '; then
+    pass "check --json reports structured status"
+  else
+    fail "check --json payload mismatch"
+    echo "$check_output" | strip_ansi | head -10 | sed 's/^/    /'
+    stop_mock_registry
+    return
+  fi
+
+  local update_output
+  update_output=$(cd "$WORKSPACE" && ASKILL_REGISTRY_URL="$registry_url" ASKILL_API_BASE_URL="$api_url" $CLI update --json 2>&1) || true
+  if echo "$update_output" | node -e '
+    const fs = require("fs");
+    const data = JSON.parse(fs.readFileSync(0, "utf8"));
+    if (data.ok !== true || data.action !== "update") process.exit(1);
+    if (!data.summary || data.summary.checked !== 1 || data.summary.skipped !== 1) process.exit(1);
+    const target = (data.results || []).find((result) => result.skill === "alpha-collection-skill");
+    if (!target || target.status !== "skipped" || target.checkStatus !== "uncheckable") process.exit(1);
+  '; then
+    pass "update --json reports skipped/no-op results"
+  else
+    fail "update --json payload mismatch"
+    echo "$update_output" | strip_ansi | head -10 | sed 's/^/    /'
+  fi
+
+  stop_mock_registry
+}
+
+# ════════════════════════════════════════════════════
 # Test: Re-install same skill (should update/overwrite)
 # ════════════════════════════════════════════════════
 test_reinstall_skill() {
@@ -2689,6 +2802,7 @@ ALL_TESTS=(
   test_add_json_invalid_agent
   test_add_json_requires_selection
   test_find_json_output
+  test_dashboard_json_contracts
   test_reinstall_skill
   test_command_aliases
   test_version_flags
