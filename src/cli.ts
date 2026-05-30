@@ -1811,20 +1811,17 @@ function parseSearchOptions(args: string[]): SearchOptions {
   };
 }
 
-function formatFindQueryArg(query: string): string {
-  if (!query.includes(' ')) {
-    return query;
-  }
-  return `"${query.replace(/"/g, '\\"')}"`;
+function shellEscapeArg(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 function buildFindCommand(query: string, tag: string | undefined, page: number, limit: number, fullDesc: boolean): string {
   const parts = ['askill find'];
   if (query) {
-    parts.push(formatFindQueryArg(query));
+    parts.push(shellEscapeArg(query));
   }
   if (tag) {
-    parts.push(`--tag ${tag}`);
+    parts.push(`--tag ${shellEscapeArg(tag)}`);
   }
   if (fullDesc) {
     parts.push('--full-desc');

@@ -3113,12 +3113,14 @@ test_dashboard_json_contracts() {
 
   local find_nav_output
   find_nav_output=$(cd "$WORKSPACE" && ASKILL_REGISTRY_URL="$registry_url" ASKILL_API_BASE_URL="$api_url" $CLI find --tag collection --limit 1 2>&1) || true
-  if output_matches "$find_nav_output" "Next:" && output_matches "$find_nav_output" "--page 2"; then
-    pass "find output shows next-page command"
-  else
-    fail "find output missing next-page command"
-    echo "$find_nav_output" | strip_ansi | head -15 | sed 's/^/    /'
-  fi
+  assert_contains "$find_nav_output" "Next:" "find output shows next-page label"
+  assert_contains "$find_nav_output" "--tag 'collection'" "find output shell-escapes tag argument"
+  assert_contains "$find_nav_output" "--page 2" "find output shows next-page number"
+
+  local find_escape_output
+  find_escape_output=$(cd "$WORKSPACE" && ASKILL_REGISTRY_URL="$registry_url" ASKILL_API_BASE_URL="$api_url" $CLI find 'shell $(unsafe)' --limit 1 2>&1) || true
+  assert_contains "$find_escape_output" "Next:" "find output shows next-page label for query"
+  assert_contains "$find_escape_output" "askill find 'shell \$(unsafe)' --limit 1 --page 2" "find output shell-escapes query argument"
 
   local info_output
   info_output=$(cd "$WORKSPACE" && ASKILL_REGISTRY_URL="$registry_url" ASKILL_API_BASE_URL="$api_url" $CLI info @mock/alpha --json 2>&1) || true
