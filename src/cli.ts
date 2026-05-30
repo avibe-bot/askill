@@ -5,7 +5,7 @@
 
 import { VERSION, REGISTRY_URL, RESET, BOLD, DIM, CYAN, GREEN, YELLOW, RED, GRAY, agents, AGENTS_DIR, SKILLS_SUBDIR, POPULAR_AGENTS, type AgentType } from './constants.ts';
 import { api, APIError, type Skill, type RepoSkill } from './api.ts';
-import { installSkill, installSkillFromDir, detectInstalledAgents, listInstalledSkills, removeSkill, removeCanonicalSkill, sanitizeName, type InstallMode } from './installer.ts';
+import { installSkill, installSkillFromDir, detectInstalledAgents, listInstalledSkills, removeSkill, removeCanonicalSkill, sanitizeName, type InstallMode, type InstalledSkill } from './installer.ts';
 import { getAvailableUpdate, selfUpdate } from './updater.ts';
 import { getPreferredAgents, savePreferredAgents } from './config.ts';
 import { loadCredentials, saveCredentials, clearCredentials, maskToken } from './credentials.ts';
@@ -14,10 +14,11 @@ import { parseSource, type ParsedSource } from './source-parser.ts';
 import { discoverSkills, filterSkills, type DiscoveredSkill } from './discover.ts';
 import { getCollectionInstallRefs } from './collection.ts';
 import { cloneRepo, cleanupTempDir, GitCloneError } from './git.ts';
-import { addSkillToLock, removeSkillFromLock, fetchSkillFolderHash, saveLastSelectedAgents, getLastSelectedAgents, getAllLockedSkills } from './lock.ts';
+import { addSkillToLock, removeSkillFromLock, fetchSkillFolderHash, saveLastSelectedAgents, getLastSelectedAgents, getAllLockedSkills, type SkillLockEntry } from './lock.ts';
 import { resolveRemoveTarget, isPathLikeRemoveTarget } from './remove-target.ts';
 import { join } from 'path';
 import { homedir } from 'os';
+import { readFile } from 'fs/promises';
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
 
@@ -257,13 +258,13 @@ function showCommandHelp(commandInput: string): boolean {
 
     list: `${BOLD}askill list${RESET}\n\nUsage:\n  askill list [options]\n\nDescription:\n  List installed skills and where they are available.\n\nOptions:\n  -g, --global            Show global skills only\n  -p, --project           Show project skills only\n  -a, --agent <agents...> Filter by agent(s)\n  --json                  Output machine-readable JSON\n\nExamples:\n  askill list\n  askill list -g\n  askill list -p -a opencode --json`,
 
-    find: `${BOLD}askill find${RESET}\n\nUsage:\n  askill find [query] [options]\n\nDescription:\n  Search indexed and published skills on askill.sh.\n\nOptions:\n  --full-desc             Show full descriptions\n  --json                  Output machine-readable JSON\n\nExamples:\n  askill find memory\n  askill find code review --full-desc\n  askill find memory --json`,
+    find: `${BOLD}askill find${RESET}\n\nUsage:\n  askill find [query] [options]\n\nDescription:\n  Search indexed and published skills on askill.sh.\n\nOptions:\n  --full-desc             Show full descriptions\n  --tag <tag>             Filter by tag\n  --page <n>              Results page (default: 1)\n  --limit <n>             Results per page (default: 20)\n  --json                  Output machine-readable JSON\n\nExamples:\n  askill find memory\n  askill find code review --full-desc\n  askill find memory --tag productivity --limit 10 --json`,
 
-    info: `${BOLD}askill info${RESET}\n\nUsage:\n  askill info <slug>\n\nDescription:\n  Show detailed metadata and installation info for one skill.\n\nExamples:\n  askill info @johndoe/awesome-tool\n  askill info gh:facebook/react@extract-errors`,
+    info: `${BOLD}askill info${RESET}\n\nUsage:\n  askill info <slug> [options]\n\nDescription:\n  Show detailed metadata and installation info for one skill.\n\nOptions:\n  --json                  Output machine-readable JSON\n\nExamples:\n  askill info @johndoe/awesome-tool\n  askill info gh:facebook/react@extract-errors --json`,
 
-    check: `${BOLD}askill check${RESET}\n\nUsage:\n  askill check [skill] [options]\n\nDescription:\n  Check installed skills for available updates without installing. Defaults to the current project's lock file.\n\nOptions:\n  -g, --global            Check global lock file\n\nExamples:\n  askill check\n  askill check memory\n  askill check -g`,
+    check: `${BOLD}askill check${RESET}\n\nUsage:\n  askill check [skill] [options]\n\nDescription:\n  Check installed skills for available updates without installing. Defaults to the current project's lock file.\n\nOptions:\n  -g, --global            Check global lock file\n  --json                  Output machine-readable JSON\n\nExamples:\n  askill check\n  askill check memory --json\n  askill check -g`,
 
-    update: `${BOLD}askill update${RESET}\n\nUsage:\n  askill update [skill] [options]\n\nDescription:\n  Update one installed skill or all installed skills. Defaults to the current project's lock file.\n\nOptions:\n  -g, --global            Update global lock file and global installs\n  -y, --yes               Skip confirmation prompts\n\nExamples:\n  askill update\n  askill update memory\n  askill update -g -y`,
+    update: `${BOLD}askill update${RESET}\n\nUsage:\n  askill update [skill] [options]\n\nDescription:\n  Update one installed skill or all installed skills. Defaults to the current project's lock file.\n\nOptions:\n  -g, --global            Update global lock file and global installs\n  -y, --yes               Skip confirmation prompts\n  --json                  Output machine-readable JSON\n\nExamples:\n  askill update\n  askill update memory --json\n  askill update -g -y`,
 
     run: `${BOLD}askill run${RESET}\n\nUsage:\n  askill run <skill>:<command> [args...]\n\nDescription:\n  Run a command declared in a skill's SKILL.md frontmatter.\n\nExamples:\n  askill run @anthropic/memory:save --key name --value \"Alice\"\n  askill run my-skill:_setup`,
 
@@ -1471,6 +1472,17 @@ interface SearchOptions {
   fullDesc: boolean;
   query: string;
   json: boolean;
+  tag?: string;
+  page: number;
+  limit: number;
+}
+
+function parsePositiveIntegerOption(value: string | undefined, optionName: string): number {
+  const parsed = Number.parseInt(value || '', 10);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    throw new Error(`${optionName} must be a positive integer`);
+  }
+  return parsed;
 }
 
 interface AIScoreDimension {
@@ -1633,19 +1645,75 @@ function normalizeInfoTarget(input: string): string {
 }
 
 function parseSearchOptions(args: string[]): SearchOptions {
-  const fullDesc = args.includes('--full-desc');
-  const json = args.includes('--json');
-  const query = args.filter((arg) => arg !== '--full-desc' && arg !== '--json').join(' ');
+  let fullDesc = false;
+  let json = false;
+  let tag: string | undefined;
+  let page = 1;
+  let limit = 20;
+  const queryParts: string[] = [];
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+
+    if (arg === '--full-desc') {
+      fullDesc = true;
+      continue;
+    }
+
+    if (arg === '--json') {
+      json = true;
+      continue;
+    }
+
+    if (arg === '--tag') {
+      tag = args[index + 1];
+      if (!tag || tag.startsWith('-')) {
+        throw new Error('--tag requires a value');
+      }
+      index += 1;
+      continue;
+    }
+
+    if (arg === '--page') {
+      page = parsePositiveIntegerOption(args[index + 1], '--page');
+      index += 1;
+      continue;
+    }
+
+    if (arg === '--limit') {
+      limit = parsePositiveIntegerOption(args[index + 1], '--limit');
+      index += 1;
+      continue;
+    }
+
+    queryParts.push(arg);
+  }
+
+  const query = queryParts.join(' ');
 
   return {
     fullDesc,
     query,
     json,
+    tag,
+    page,
+    limit,
   };
 }
 
 async function runSearch(args: string[]): Promise<void> {
-  const { fullDesc, query, json } = parseSearchOptions(args);
+  let parsedOptions: SearchOptions;
+  try {
+    parsedOptions = parseSearchOptions(args);
+  } catch (error) {
+    if (args.includes('--json')) {
+      printJsonError('INVALID_OPTIONS', error instanceof Error ? error.message : 'Invalid search options');
+    }
+    console.log(`${RED}Error: ${error instanceof Error ? error.message : 'Invalid search options'}${RESET}`);
+    process.exit(1);
+  }
+
+  const { fullDesc, query, json, tag, page, limit } = parsedOptions;
 
   if (!json) {
     console.log();
@@ -1653,12 +1721,16 @@ async function runSearch(args: string[]): Promise<void> {
   }
 
   const spinner = createSpinner(json);
-  spinner.start(query ? `Searching for "${query}"...` : 'Loading skills...');
+  const searchLabel = query ? `Searching for "${query}"...` : tag ? `Loading skills tagged "${tag}"...` : 'Loading skills...';
+  spinner.start(searchLabel);
 
   try {
-    const response = query
-      ? await api.search(query, 20)
-      : await api.listSkills({ limit: 20 });
+    const response = await api.listSkills({
+      q: query || undefined,
+      tag,
+      page,
+      limit,
+    });
 
     const skills = response.data || [];
     spinner.stop(`Found ${skills.length} result(s)`);
@@ -1694,6 +1766,19 @@ async function runSearch(args: string[]): Promise<void> {
       printJson({
         ok: true,
         query,
+        filters: {
+          tag: tag || null,
+        },
+        sort: {
+          field: null,
+          order: null,
+        },
+        pagination: response.pagination || {
+          page,
+          limit,
+          total: normalized.length,
+          totalPages: normalized.length === 0 ? 0 : 1,
+        },
         count: normalized.length,
         skills: normalized,
       });
@@ -1796,6 +1881,86 @@ function parseListOptions(args: string[]): ListOptions {
   return options;
 }
 
+function lockForInstalledSkill(skill: InstalledSkill, locks: Record<string, SkillLockEntry>): SkillLockEntry | null {
+  if (locks[skill.name]) {
+    return locks[skill.name];
+  }
+
+  const sanitized = sanitizeName(skill.name);
+  if (locks[sanitized]) {
+    return locks[sanitized];
+  }
+
+  const matchingKey = Object.keys(locks).find((name) => sanitizeName(name) === skill.name);
+  return matchingKey ? locks[matchingKey] : null;
+}
+
+async function readInstalledSkillFrontmatter(skill: InstalledSkill): Promise<Record<string, unknown>> {
+  try {
+    const content = await readFile(join(skill.path, 'SKILL.md'), 'utf-8');
+    return parseSkillMd(content).frontmatter as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+function stringOrNull(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function stringArrayOrEmpty(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.map((item) => String(item).trim()).filter(Boolean)
+    : [];
+}
+
+function installSourceFromLock(entry: SkillLockEntry | null, skillName: string): string | null {
+  if (!entry) return null;
+
+  if (entry.sourceType === 'github' && entry.source) {
+    if (entry.skillPath) {
+      return `gh:${entry.source}/${entry.skillPath}`;
+    }
+    return `gh:${entry.source}@${skillName}`;
+  }
+
+  return entry.source || entry.sourceUrl || null;
+}
+
+async function toListSkillJson(
+  skill: InstalledSkill,
+  locks: Record<string, SkillLockEntry>
+): Promise<Record<string, unknown>> {
+  const frontmatter = await readInstalledSkillFrontmatter(skill);
+  const lock = lockForInstalledSkill(skill, locks);
+  const description = stringOrNull(frontmatter.description) || '';
+  const version = stringOrNull(frontmatter.version);
+  const tags = stringArrayOrEmpty(frontmatter.tags);
+  const installSource = installSourceFromLock(lock, skill.name);
+
+  return {
+    name: skill.name,
+    description,
+    version,
+    tags,
+    scope: skill.scope,
+    path: skill.path,
+    agents: skill.agents.map(toAgentOutput),
+    source: lock ? {
+      value: lock.source,
+      type: lock.sourceType,
+      url: lock.sourceUrl,
+      skillPath: lock.skillPath || null,
+    } : null,
+    sourceType: lock?.sourceType || null,
+    sourceUrl: lock?.sourceUrl || null,
+    skillPath: lock?.skillPath || null,
+    installSource,
+    installedAt: lock?.installedAt || null,
+    updatedAt: lock?.updatedAt || null,
+  };
+}
+
 async function runList(args: string[]): Promise<void> {
   const options = parseListOptions(args);
 
@@ -1840,6 +2005,15 @@ async function runList(args: string[]): Promise<void> {
   spinner.stop(`Found ${filteredSkills.length} skill(s)`);
 
   if (options.json) {
+    const [projectLocks, globalLocks] = await Promise.all([
+      getAllLockedSkills({ global: false }).catch(() => ({} as Record<string, SkillLockEntry>)),
+      getAllLockedSkills({ global: true }).catch(() => ({} as Record<string, SkillLockEntry>)),
+    ]);
+    const listSkills = await Promise.all(filteredSkills.map((skill) => toListSkillJson(
+      skill,
+      skill.scope === 'global' ? globalLocks : projectLocks
+    )));
+
     const payload = {
       ok: true,
       filters: {
@@ -1851,12 +2025,7 @@ async function runList(args: string[]): Promise<void> {
         global: filteredSkills.filter((skill) => skill.scope === 'global').length,
         project: filteredSkills.filter((skill) => skill.scope === 'project').length,
       },
-      skills: filteredSkills.map((skill) => ({
-        name: skill.name,
-        scope: skill.scope,
-        path: skill.path,
-        agents: skill.agents.map(toAgentOutput),
-      })),
+      skills: listSkills,
     };
 
     printJson(payload);
@@ -2167,10 +2336,66 @@ async function runRemove(args: string[]): Promise<void> {
 // Info Command
 // ============================================
 
+interface InfoOptions {
+  json: boolean;
+  target: string;
+}
+
+function parseInfoOptions(args: string[]): InfoOptions {
+  const options: InfoOptions = { json: false, target: '' };
+
+  for (const arg of args) {
+    if (arg === '--json') {
+      options.json = true;
+      continue;
+    }
+
+    if (!arg.startsWith('-') && !options.target) {
+      options.target = arg;
+    }
+  }
+
+  return options;
+}
+
+function installSourceFromRegistrySkill(skill: Skill, displayName: string): string {
+  return skill.owner && skill.repo
+    ? `gh:${skill.owner}/${skill.repo}@${displayName}`
+    : `gh:${displayName}`;
+}
+
+async function getInstalledInfoForSkill(displayName: string): Promise<Record<string, unknown>> {
+  const [installedSkills, projectLocks, globalLocks] = await Promise.all([
+    listInstalledSkills({ global: undefined }),
+    getAllLockedSkills({ global: false }).catch(() => ({} as Record<string, SkillLockEntry>)),
+    getAllLockedSkills({ global: true }).catch(() => ({} as Record<string, SkillLockEntry>)),
+  ]);
+
+  const candidates = new Set([displayName, sanitizeName(displayName)]);
+  const installations = await Promise.all(installedSkills
+    .filter((skill) => candidates.has(skill.name) || sanitizeName(skill.name) === sanitizeName(displayName))
+    .map(async (skill) => toListSkillJson(
+      skill,
+      skill.scope === 'global' ? globalLocks : projectLocks
+    )));
+
+  return {
+    installed: installations.length > 0,
+    project: installations.some((item) => item.scope === 'project'),
+    global: installations.some((item) => item.scope === 'global'),
+    count: installations.length,
+    installations,
+  };
+}
+
 async function runInfo(args: string[]): Promise<void> {
-  const inputTarget = args[0];
+  const options = parseInfoOptions(args);
+  const inputTarget = options.target;
 
   if (!inputTarget) {
+    if (options.json) {
+      printJsonError('MISSING_SKILL', 'Missing skill name');
+    }
     console.log(`${RED}Error: Missing skill name${RESET}`);
     console.log(`Usage: askill info <skill-name>`);
     process.exit(1);
@@ -2178,30 +2403,59 @@ async function runInfo(args: string[]): Promise<void> {
 
   const skillName = normalizeInfoTarget(inputTarget);
 
-  console.log();
-  p.intro(pc.bgCyan(pc.black(' askill info ')));
+  if (!options.json) {
+    console.log();
+    p.intro(pc.bgCyan(pc.black(' askill info ')));
+  }
 
-  const spinner = p.spinner();
+  const spinner = createSpinner(options.json);
   spinner.start(`Fetching ${skillName}...`);
 
   try {
     const skill = await api.getSkill(skillName);
+    let rawContent = skill.rawContent || null;
+    if (!rawContent) {
+      rawContent = await api.getSkillRaw(skillName).catch(() => null);
+    }
     spinner.stop('');
 
     const displayName = skill.name || 'unknown';
-    const version = (() => {
-      try {
-        if (!skill.rawContent) return '';
-        const parsed = parseSkillMd(skill.rawContent);
-        return typeof parsed.frontmatter.version === 'string'
-          ? parsed.frontmatter.version.trim()
-          : '';
-      } catch {
-        return '';
-      }
-    })();
+    const parsedContent = rawContent ? parseSkillMd(rawContent) : parseSkillMd('');
+    const version = stringOrNull(parsedContent.frontmatter.version) || '';
     const owner = skill.owner || 'unknown';
     const repo = skill.repo || '';
+    const installSource = installSourceFromRegistrySkill(skill, displayName);
+
+    if (options.json) {
+      printJson({
+        ok: true,
+        skill: {
+          id: skill.id,
+          name: displayName,
+          description: skill.description || parsedContent.frontmatter.description || '',
+          version: version || null,
+          owner,
+          repo: skill.repo || null,
+          path: skill.path || null,
+          tags: skill.tags || [],
+          stars: skill.stars ?? null,
+          aiScore: getTotalAIScore(skill),
+          aiBreakdown: getAIScoreDimensions(skill).map((dimension) => ({
+            key: dimension.key,
+            label: dimension.label,
+            score: dimension.score,
+          })),
+          updatedAt: skill.updatedAt || null,
+          createdAt: skill.createdAt || null,
+          installSource,
+          url: skill.id ? `${REGISTRY_URL}/skills/${skill.id}` : null,
+          frontmatter: parsedContent.frontmatter,
+          commands: parsedContent.frontmatter.commands || {},
+        },
+        installed: await getInstalledInfoForSkill(displayName),
+      });
+      return;
+    }
 
     console.log();
     console.log(`  ${pc.bold(displayName)}`);
@@ -2240,16 +2494,16 @@ async function runInfo(args: string[]): Promise<void> {
     console.log();
 
     // Build install command
-    const installCmd = skill.owner && skill.repo
-      ? `${skill.owner}/${skill.repo}@${displayName}`
-      : displayName;
-    console.log(`  ${pc.dim('Install:')}    ${pc.cyan(`askill install gh:${installCmd}`)}`);
+    console.log(`  ${pc.dim('Install:')}    ${pc.cyan(`askill install ${installSource}`)}`);
     console.log();
 
     p.outro('');
   } catch (error) {
     if (error instanceof APIError && error.status === 404) {
       spinner.stop(pc.red('Not found'));
+      if (options.json) {
+        printJsonError('SKILL_NOT_FOUND', `Skill "${skillName}" not found`);
+      }
       p.outro(pc.red(`Skill "${skillName}" not found`));
       process.exit(1);
     }
@@ -2272,15 +2526,25 @@ export interface SkillUpdateInfo {
 
 interface ScopedSkillOptions {
   global: boolean;
+  json: boolean;
   skillName?: string;
 }
 
 function parseScopedSkillOptions(args: string[]): ScopedSkillOptions {
-  const options: ScopedSkillOptions = { global: false };
+  const options: ScopedSkillOptions = { global: false, json: false };
 
   for (const arg of args) {
     if (arg === '-g' || arg === '--global') {
       options.global = true;
+      continue;
+    }
+
+    if (arg === '--json') {
+      options.json = true;
+      continue;
+    }
+
+    if (arg === '-y' || arg === '--yes') {
       continue;
     }
 
@@ -2292,9 +2556,138 @@ function parseScopedSkillOptions(args: string[]): ScopedSkillOptions {
   return options;
 }
 
+type SkillCheckStatus = 'update_available' | 'up_to_date' | 'uncheckable';
+
+interface SkillCheckResult {
+  name: string;
+  scope: 'project' | 'global';
+  status: SkillCheckStatus;
+  source: string;
+  sourceType: string;
+  sourceUrl: string;
+  skillPath: string | null;
+  localHash: string | null;
+  remoteHash: string | null;
+  reason: string | null;
+  installedAt: string | null;
+  updatedAt: string | null;
+}
+
+interface SkillCheckPayload {
+  ok: true;
+  scope: 'project' | 'global';
+  requestedSkill: string | null;
+  count: number;
+  summary: {
+    total: number;
+    updateAvailable: number;
+    upToDate: number;
+    uncheckable: number;
+  };
+  skills: SkillCheckResult[];
+}
+
+function summarizeCheckResults(results: SkillCheckResult[]): SkillCheckPayload['summary'] {
+  return {
+    total: results.length,
+    updateAvailable: results.filter((result) => result.status === 'update_available').length,
+    upToDate: results.filter((result) => result.status === 'up_to_date').length,
+    uncheckable: results.filter((result) => result.status === 'uncheckable').length,
+  };
+}
+
+function uncheckableReason(entry: SkillLockEntry): string | null {
+  if (entry.sourceType !== 'github' || !entry.source) {
+    if (entry.sourceType === 'local') return 'local source';
+    if (entry.sourceType === 'collection') return 'installed from shared collection (reinstall collection to refresh)';
+    if (entry.sourceType === 'registry') return 'registry source does not include an update hash';
+    return 'source type not auto-checkable';
+  }
+
+  if (!entry.skillFolderHash) {
+    return 'no hash recorded (reinstall to fix)';
+  }
+
+  return null;
+}
+
+async function buildCheckPayload(options: ScopedSkillOptions): Promise<SkillCheckPayload> {
+  const scope: 'project' | 'global' = options.global ? 'global' : 'project';
+  const skills = await getAllLockedSkills({ global: options.global });
+  const skillEntries = Object.entries(skills).filter(([name]) => !options.skillName || name === options.skillName);
+  const results: SkillCheckResult[] = [];
+
+  for (const [name, entry] of skillEntries) {
+    const base = {
+      name,
+      scope,
+      source: entry.source,
+      sourceType: entry.sourceType,
+      sourceUrl: entry.sourceUrl,
+      skillPath: entry.skillPath || null,
+      localHash: entry.skillFolderHash || null,
+      installedAt: entry.installedAt || null,
+      updatedAt: entry.updatedAt || null,
+    };
+
+    const reason = uncheckableReason(entry);
+    if (reason) {
+      results.push({
+        ...base,
+        status: 'uncheckable',
+        remoteHash: null,
+        reason,
+      });
+      continue;
+    }
+
+    try {
+      const remoteHash = await fetchSkillFolderHash(entry.source, entry.skillPath || '');
+
+      if (!remoteHash) {
+        results.push({
+          ...base,
+          status: 'uncheckable',
+          remoteHash: null,
+          reason: 'could not fetch remote hash',
+        });
+        continue;
+      }
+
+      results.push({
+        ...base,
+        status: remoteHash !== entry.skillFolderHash ? 'update_available' : 'up_to_date',
+        remoteHash,
+        reason: null,
+      });
+    } catch {
+      results.push({
+        ...base,
+        status: 'uncheckable',
+        remoteHash: null,
+        reason: 'failed to check remote',
+      });
+    }
+  }
+
+  return {
+    ok: true,
+    scope,
+    requestedSkill: options.skillName || null,
+    count: results.length,
+    summary: summarizeCheckResults(results),
+    skills: results,
+  };
+}
+
 async function runCheck(args: string[]): Promise<void> {
   const options = parseScopedSkillOptions(args);
   const lockOptions = { global: options.global };
+
+  if (options.json) {
+    printJson(await buildCheckPayload(options));
+    return;
+  }
 
   console.log();
   p.intro(pc.bgCyan(pc.black(' askill check ')));
@@ -2397,10 +2790,198 @@ async function runCheck(args: string[]): Promise<void> {
 // Update Command
 // ============================================
 
+interface SkillUpdateResult {
+  skill: string;
+  status: 'updated' | 'skipped' | 'failed';
+  success: boolean;
+  checkStatus: SkillCheckStatus;
+  reason: string | null;
+  error: string | null;
+  source: string;
+  sourceUrl: string;
+  skillPath: string | null;
+  localHash: string | null;
+  remoteHash: string | null;
+  agents: Array<{ id: AgentType; name: string }>;
+}
+
+async function resolveUpdateAgents(lockOptions: { global: boolean }): Promise<AgentType[]> {
+  const lastAgents = await getLastSelectedAgents(lockOptions);
+  if (lastAgents && lastAgents.length > 0) {
+    return lastAgents.filter((agent): agent is AgentType => Boolean(agents[agent]));
+  }
+
+  return detectInstalledAgents();
+}
+
+function skippedUpdateResult(check: SkillCheckResult): SkillUpdateResult {
+  return {
+    skill: check.name,
+    status: 'skipped',
+    success: true,
+    checkStatus: check.status,
+    reason: check.reason || (check.status === 'up_to_date' ? 'already up to date' : null),
+    error: null,
+    source: check.source,
+    sourceUrl: check.sourceUrl,
+    skillPath: check.skillPath,
+    localHash: check.localHash,
+    remoteHash: check.remoteHash,
+    agents: [],
+  };
+}
+
+async function updateOneSkillJson(
+  check: SkillCheckResult,
+  targetAgents: AgentType[],
+  lockEntries: Record<string, SkillLockEntry>,
+  lockOptions: { global: boolean }
+): Promise<SkillUpdateResult> {
+  let tempDir: string | undefined;
+
+  try {
+    tempDir = await cloneRepo(check.sourceUrl, undefined, check.skillPath || undefined);
+
+    let discovered = await discoverSkills(tempDir, check.skillPath || undefined);
+    discovered = discovered.filter((skill) => skill.name === check.name);
+
+    if (discovered.length === 0) {
+      discovered = await discoverSkills(tempDir);
+      discovered = discovered.filter((skill) => skill.name === check.name);
+    }
+
+    if (discovered.length === 0) {
+      throw new Error(`Skill "${check.name}" not found in source`);
+    }
+
+    const skill = discovered[0];
+    const installErrors: string[] = [];
+    for (const agent of targetAgents) {
+      const result = skill.path
+        ? await installSkillFromDir(skill.name, skill.path, agent, { mode: 'symlink', global: lockOptions.global })
+        : await installSkill(skill.name, skill.rawContent, agent, { mode: 'symlink', global: lockOptions.global });
+
+      if (!result.success) {
+        installErrors.push(`${agent}: ${result.error || 'Unknown error'}`);
+      }
+    }
+
+    if (installErrors.length > 0) {
+      throw new Error(installErrors.join('; '));
+    }
+
+    const lockEntry = lockEntries[check.name];
+    await addSkillToLock(check.name, {
+      source: lockEntry.source,
+      sourceType: lockEntry.sourceType,
+      sourceUrl: lockEntry.sourceUrl,
+      skillPath: lockEntry.skillPath,
+      skillFolderHash: check.remoteHash || '',
+    }, lockOptions);
+
+    return {
+      skill: check.name,
+      status: 'updated',
+      success: true,
+      checkStatus: check.status,
+      reason: null,
+      error: null,
+      source: check.source,
+      sourceUrl: check.sourceUrl,
+      skillPath: check.skillPath,
+      localHash: check.localHash,
+      remoteHash: check.remoteHash,
+      agents: targetAgents.map(toAgentOutput),
+    };
+  } catch (error) {
+    return {
+      skill: check.name,
+      status: 'failed',
+      success: false,
+      checkStatus: check.status,
+      reason: null,
+      error: error instanceof Error ? error.message : 'Unknown error',
+      source: check.source,
+      sourceUrl: check.sourceUrl,
+      skillPath: check.skillPath,
+      localHash: check.localHash,
+      remoteHash: check.remoteHash,
+      agents: targetAgents.map(toAgentOutput),
+    };
+  } finally {
+    if (tempDir) {
+      await cleanupTempDir(tempDir).catch(() => {});
+    }
+  }
+}
+
+async function runUpdateJson(options: ScopedSkillOptions): Promise<void> {
+  const lockOptions = { global: options.global };
+  const checkPayload = await buildCheckPayload(options);
+  const lockEntries = await getAllLockedSkills(lockOptions);
+  const updatable = checkPayload.skills.filter((skill) => skill.status === 'update_available');
+  const skipped = checkPayload.skills
+    .filter((skill) => skill.status !== 'update_available')
+    .map(skippedUpdateResult);
+
+  let targetAgents: AgentType[] = [];
+  const updateResults: SkillUpdateResult[] = [];
+
+  if (updatable.length > 0) {
+    targetAgents = await resolveUpdateAgents(lockOptions);
+
+    if (targetAgents.length === 0) {
+      updateResults.push(...updatable.map((skill) => ({
+        ...skippedUpdateResult(skill),
+        status: 'failed' as const,
+        success: false,
+        reason: null,
+        error: 'No agents found for update target',
+      })));
+    } else {
+      for (const skill of updatable) {
+        updateResults.push(await updateOneSkillJson(skill, targetAgents, lockEntries, lockOptions));
+      }
+    }
+  }
+
+  const results = [...skipped, ...updateResults];
+  const failed = results.filter((result) => result.status === 'failed').length;
+  const updated = results.filter((result) => result.status === 'updated').length;
+
+  printJson({
+    ok: failed === 0,
+    action: 'update',
+    scope: checkPayload.scope,
+    requestedSkill: checkPayload.requestedSkill,
+    targetAgents: targetAgents.map(toAgentOutput),
+    check: {
+      summary: checkPayload.summary,
+    },
+    summary: {
+      checked: checkPayload.summary.total,
+      updateAvailable: checkPayload.summary.updateAvailable,
+      updated,
+      skipped: skipped.length,
+      failed,
+    },
+    results,
+  });
+
+  if (failed > 0) {
+    process.exitCode = 1;
+  }
+}
+
 async function runUpdate(args: string[]): Promise<void> {
-  const isYes = args.includes('-y') || args.includes('--yes');
+  const isYes = args.includes('-y') || args.includes('--yes') || args.includes('--json');
   const scopeOptions = parseScopedSkillOptions(args);
   const lockOptions = { global: scopeOptions.global };
+
+  if (scopeOptions.json) {
+    await runUpdateJson(scopeOptions);
+    return;
+  }
 
   console.log();
   p.intro(pc.bgCyan(pc.black(' askill update ')));

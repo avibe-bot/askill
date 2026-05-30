@@ -4,10 +4,13 @@ Machine-readable schemas for `askill --json` output.
 
 ## Files
 
-- `askill-cli-json.schema.json`: top-level union schema for `add`, `find`, `list`, `remove`, and generic error payloads
+- `askill-cli-json.schema.json`: top-level union schema for `add`, `find`, `list`, `info`, `check`, `update`, `remove`, and generic error payloads
 - `add.response.schema.json`: `askill add ... --json` success payload
 - `find.response.schema.json`: `askill find ... --json` success payload
 - `list.response.schema.json`: `askill list ... --json` success payload
+- `info.response.schema.json`: `askill info ... --json` success payload
+- `check.response.schema.json`: `askill check ... --json` success payload
+- `update.response.schema.json`: `askill update ... --json` success payload
 - `remove.response.schema.json`: `askill remove ... --json` success payload
 - `error.response.schema.json`: generic error payload (`ok: false`)
 

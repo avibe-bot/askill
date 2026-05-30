@@ -198,8 +198,9 @@ askill find [query] [options]
 
 | Option | Description |
 |--------|-------------|
-| `--tag <tag>` | Filter by tag (Planned) |
-| `--limit <n>` | Number of results (default: 20) (Planned) |
+| `--tag <tag>` | Filter by tag |
+| `--page <n>` | Results page (default: 1) |
+| `--limit <n>` | Number of results per page (default: 20) |
 | `--json` | Output machine-readable JSON |
 
 ### Examples
@@ -217,8 +218,8 @@ askill find code review
 # Machine-readable results for web integrations
 askill find memory --json
 
-# Filter by tag (Planned)
-askill find --tag git
+# Filter by tag and limit results
+askill find --tag git --limit 10 --json
 ```
 
 ---
@@ -230,13 +231,20 @@ Display detailed information about a skill.
 ### Usage
 
 ```bash
-askill info <slug>
+askill info <slug> [options]
 ```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output machine-readable JSON including registry metadata, parsed frontmatter, commands, and local installation state |
 
 ### Examples
 
 ```bash
 askill info gh:facebook/react@extract-errors
+askill info gh:facebook/react@extract-errors --json
 ```
 
 ### Output
@@ -278,6 +286,7 @@ askill update [skill] [options]
 |--------|-------------|
 | `-g, --global` | Update global skills from the global lock file |
 | `-y, --yes` | Skip confirmation prompts |
+| `--json` | Output machine-readable JSON and skip confirmation prompts |
 
 ### Examples
 
@@ -290,6 +299,7 @@ askill update extract-errors
 
 # Update global skills
 askill update -g
+askill update extract-errors --json
 ```
 
 ---
@@ -309,6 +319,7 @@ askill check [skill] [options]
 | Option | Description |
 |--------|-------------|
 | `-g, --global` | Check global skills from the global lock file |
+| `--json` | Output machine-readable JSON |
 
 ### Examples
 
@@ -318,6 +329,7 @@ askill check
 
 # Check global skills
 askill check -g
+askill check extract-errors --json
 ```
 
 ---
@@ -599,7 +611,7 @@ These options work with all commands:
 |--------|-------------|
 | `-h, --help` | Show help |
 | `-v, --version` | Show version |
-| `--json` | Machine-readable output (supported by `add`, `find`, `list`, `remove`) |
+| `--json` | Machine-readable output (supported by `add`, `find`, `list`, `info`, `check`, `update`, `remove`) |
 | `--verbose` | Verbose output (Planned) |
 | `--no-color` | Disable colored output (Planned) |
 

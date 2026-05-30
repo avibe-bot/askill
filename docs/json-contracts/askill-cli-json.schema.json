@@ -2,11 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/avibe-bot/askill/main/docs/json-contracts/askill-cli-json.schema.json",
   "title": "askill CLI JSON output schema",
-  "description": "Machine-readable output contract for askill CLI commands in --json mode (add/find/list/remove).",
+  "description": "Machine-readable output contract for askill CLI commands in --json mode.",
   "oneOf": [
     { "$ref": "#/$defs/AddResponse" },
     { "$ref": "#/$defs/FindResponse" },
     { "$ref": "#/$defs/ListResponse" },
+    { "$ref": "#/$defs/InfoResponse" },
+    { "$ref": "#/$defs/CheckResponse" },
+    { "$ref": "#/$defs/UpdateResponse" },
     { "$ref": "#/$defs/RemoveResponse" },
     { "$ref": "#/$defs/ErrorResponse" }
   ],
@@ -17,7 +20,8 @@
       "properties": {
         "id": { "type": "string" },
         "name": { "type": "string" }
-      }
+      },
+      "additionalProperties": true
     },
     "ErrorObject": {
       "type": "object",
@@ -26,7 +30,8 @@
         "code": { "type": "string" },
         "message": { "type": "string" },
         "details": {}
-      }
+      },
+      "additionalProperties": true
     },
     "ErrorResponse": {
       "type": "object",
@@ -34,24 +39,36 @@
       "properties": {
         "ok": { "const": false },
         "error": { "$ref": "#/$defs/ErrorObject" }
-      }
+      },
+      "additionalProperties": true
+    },
+    "Pagination": {
+      "type": "object",
+      "required": ["page", "limit", "total", "totalPages"],
+      "properties": {
+        "page": { "type": "integer", "minimum": 1 },
+        "limit": { "type": "integer", "minimum": 1 },
+        "total": { "type": "integer", "minimum": 0 },
+        "totalPages": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": true
     },
     "SourceObject": {
       "type": "object",
       "required": ["input", "type", "owner", "repo", "ref", "subpath", "skillFilter", "url"],
       "properties": {
         "input": { "type": "string" },
-        "type": {
-          "type": "string",
-          "enum": ["github", "local", "git", "registry"]
-        },
+        "type": { "type": "string" },
         "owner": { "type": ["string", "null"] },
         "repo": { "type": ["string", "null"] },
         "ref": { "type": ["string", "null"] },
         "subpath": { "type": ["string", "null"] },
         "skillFilter": { "type": ["string", "null"] },
+        "collectionOwner": { "type": ["string", "null"] },
+        "collectionHandle": { "type": ["string", "null"] },
         "url": { "type": ["string", "null"] }
-      }
+      },
+      "additionalProperties": true
     },
     "AddDiscoveredSkill": {
       "type": "object",
@@ -61,7 +78,8 @@
         "description": { "type": "string" },
         "path": { "type": ["string", "null"] },
         "frontmatter": { "type": "object" }
-      }
+      },
+      "additionalProperties": true
     },
     "AddRequestedSkill": {
       "type": "object",
@@ -69,7 +87,8 @@
       "properties": {
         "name": { "type": "string" },
         "description": { "type": "string" }
-      }
+      },
+      "additionalProperties": true
     },
     "AddSummary": {
       "type": "object",
@@ -79,8 +98,10 @@
         "successful": { "type": "integer", "minimum": 0 },
         "failed": { "type": "integer", "minimum": 0 },
         "skills": { "type": "integer", "minimum": 0 },
-        "dependencies": { "type": "integer", "minimum": 0 }
-      }
+        "dependencies": { "type": "integer", "minimum": 0 },
+        "skippedInvalidDependencies": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": true
     },
     "AddResultItem": {
       "type": "object",
@@ -92,106 +113,93 @@
         "success": { "type": "boolean" },
         "error": { "type": ["string", "null"] },
         "isDependency": { "type": "boolean" }
-      }
+      },
+      "additionalProperties": true
     },
     "AddResponse": {
       "type": "object",
-      "required": ["ok", "action", "source", "skills"],
+      "required": ["ok", "action", "source"],
       "properties": {
         "ok": { "type": "boolean" },
         "action": { "type": "string", "enum": ["preview", "install"] },
         "source": { "$ref": "#/$defs/SourceObject" },
         "count": { "type": "integer", "minimum": 0 },
-        "skills": {
-          "type": "array",
-          "items": { "$ref": "#/$defs/AddDiscoveredSkill" }
-        },
+        "skills": { "type": "array", "items": { "$ref": "#/$defs/AddDiscoveredSkill" } },
         "scope": { "type": "string", "enum": ["project", "global"] },
         "mode": { "type": "string", "enum": ["symlink", "copy"] },
-        "selectedAgents": {
-          "type": "array",
-          "items": { "$ref": "#/$defs/AgentRef" }
-        },
-        "requestedSkills": {
-          "type": "array",
-          "items": { "$ref": "#/$defs/AddRequestedSkill" }
-        },
+        "selectedAgents": { "type": "array", "items": { "$ref": "#/$defs/AgentRef" } },
+        "requestedSkills": { "type": "array", "items": { "$ref": "#/$defs/AddRequestedSkill" } },
         "summary": { "$ref": "#/$defs/AddSummary" },
-        "results": {
-          "type": "array",
-          "items": { "$ref": "#/$defs/AddResultItem" }
-        }
-      }
+        "results": { "type": "array", "items": { "$ref": "#/$defs/AddResultItem" } }
+      },
+      "additionalProperties": true
     },
-    "FindAiBreakdownItem": {
+    "AiBreakdownItem": {
       "type": "object",
       "required": ["key", "label", "score"],
       "properties": {
         "key": { "type": "string" },
         "label": { "type": "string" },
         "score": { "type": "number" }
-      }
+      },
+      "additionalProperties": true
     },
     "FindSkillItem": {
       "type": "object",
-      "required": [
-        "id",
-        "name",
-        "description",
-        "owner",
-        "repo",
-        "tags",
-        "stars",
-        "aiScore",
-        "aiBreakdown",
-        "updatedAt",
-        "installSource",
-        "url"
-      ],
+      "required": ["id", "name", "description", "owner", "repo", "tags", "stars", "aiScore", "aiBreakdown", "updatedAt", "installSource", "url"],
       "properties": {
         "id": { "type": ["string", "number"] },
         "name": { "type": "string" },
         "description": { "type": "string" },
         "owner": { "type": "string" },
         "repo": { "type": ["string", "null"] },
-        "tags": {
-          "type": "array",
-          "items": { "type": "string" }
-        },
+        "tags": { "type": "array", "items": { "type": "string" } },
         "stars": { "type": ["number", "null"] },
-        "aiScore": { "type": "number" },
-        "aiBreakdown": {
-          "type": "array",
-          "items": { "$ref": "#/$defs/FindAiBreakdownItem" }
-        },
+        "aiScore": { "type": ["number", "null"] },
+        "aiBreakdown": { "type": "array", "items": { "$ref": "#/$defs/AiBreakdownItem" } },
         "updatedAt": { "type": ["string", "null"] },
         "installSource": { "type": "string" },
         "url": { "type": ["string", "null"] }
-      }
+      },
+      "additionalProperties": true
     },
     "FindResponse": {
       "type": "object",
-      "required": ["ok", "query", "count", "skills"],
+      "required": ["ok", "query", "filters", "pagination", "count", "skills"],
       "properties": {
         "ok": { "const": true },
         "query": { "type": "string" },
+        "filters": {
+          "type": "object",
+          "required": ["tag"],
+          "properties": { "tag": { "type": ["string", "null"] } },
+          "additionalProperties": true
+        },
+        "sort": { "type": "object" },
+        "pagination": { "$ref": "#/$defs/Pagination" },
         "count": { "type": "integer", "minimum": 0 },
-        "skills": {
-          "type": "array",
-          "items": { "$ref": "#/$defs/FindSkillItem" }
-        }
-      }
+        "skills": { "type": "array", "items": { "$ref": "#/$defs/FindSkillItem" } }
+      },
+      "additionalProperties": true
+    },
+    "ListSource": {
+      "type": ["object", "null"],
+      "properties": {
+        "value": { "type": "string" },
+        "type": { "type": "string" },
+        "url": { "type": "string" },
+        "skillPath": { "type": ["string", "null"] }
+      },
+      "additionalProperties": true
     },
     "ListFilters": {
       "type": "object",
       "required": ["scope", "agents"],
       "properties": {
         "scope": { "type": "string", "enum": ["all", "project", "global"] },
-        "agents": {
-          "type": "array",
-          "items": { "$ref": "#/$defs/AgentRef" }
-        }
-      }
+        "agents": { "type": "array", "items": { "$ref": "#/$defs/AgentRef" } }
+      },
+      "additionalProperties": true
     },
     "ListSummary": {
       "type": "object",
@@ -199,20 +207,29 @@
       "properties": {
         "global": { "type": "integer", "minimum": 0 },
         "project": { "type": "integer", "minimum": 0 }
-      }
+      },
+      "additionalProperties": true
     },
     "ListSkillItem": {
       "type": "object",
-      "required": ["name", "scope", "path", "agents"],
+      "required": ["name", "description", "version", "tags", "scope", "path", "agents", "source", "installSource", "installedAt", "updatedAt"],
       "properties": {
         "name": { "type": "string" },
+        "description": { "type": "string" },
+        "version": { "type": ["string", "null"] },
+        "tags": { "type": "array", "items": { "type": "string" } },
         "scope": { "type": "string", "enum": ["project", "global"] },
         "path": { "type": "string" },
-        "agents": {
-          "type": "array",
-          "items": { "$ref": "#/$defs/AgentRef" }
-        }
-      }
+        "agents": { "type": "array", "items": { "$ref": "#/$defs/AgentRef" } },
+        "source": { "$ref": "#/$defs/ListSource" },
+        "sourceType": { "type": ["string", "null"] },
+        "sourceUrl": { "type": ["string", "null"] },
+        "skillPath": { "type": ["string", "null"] },
+        "installSource": { "type": ["string", "null"] },
+        "installedAt": { "type": ["string", "null"] },
+        "updatedAt": { "type": ["string", "null"] }
+      },
+      "additionalProperties": true
     },
     "ListResponse": {
       "type": "object",
@@ -222,19 +239,155 @@
         "filters": { "$ref": "#/$defs/ListFilters" },
         "count": { "type": "integer", "minimum": 0 },
         "summary": { "$ref": "#/$defs/ListSummary" },
-        "skills": {
-          "type": "array",
-          "items": { "$ref": "#/$defs/ListSkillItem" }
+        "skills": { "type": "array", "items": { "$ref": "#/$defs/ListSkillItem" } }
+      },
+      "additionalProperties": true
+    },
+    "InfoResponse": {
+      "type": "object",
+      "required": ["ok", "skill", "installed"],
+      "properties": {
+        "ok": { "const": true },
+        "skill": {
+          "type": "object",
+          "required": ["id", "name", "description", "version", "owner", "repo", "path", "tags", "stars", "aiScore", "aiBreakdown", "updatedAt", "createdAt", "installSource", "url", "frontmatter", "commands"],
+          "properties": {
+            "id": { "type": ["string", "number"] },
+            "name": { "type": "string" },
+            "description": { "type": "string" },
+            "version": { "type": ["string", "null"] },
+            "owner": { "type": "string" },
+            "repo": { "type": ["string", "null"] },
+            "path": { "type": ["string", "null"] },
+            "tags": { "type": "array", "items": { "type": "string" } },
+            "stars": { "type": ["number", "null"] },
+            "aiScore": { "type": ["number", "null"] },
+            "aiBreakdown": { "type": "array", "items": { "$ref": "#/$defs/AiBreakdownItem" } },
+            "updatedAt": { "type": ["string", "null"] },
+            "createdAt": { "type": ["string", "null"] },
+            "installSource": { "type": "string" },
+            "url": { "type": ["string", "null"] },
+            "frontmatter": { "type": "object" },
+            "commands": { "type": "object" }
+          },
+          "additionalProperties": true
+        },
+        "installed": {
+          "type": "object",
+          "required": ["installed", "project", "global", "count", "installations"],
+          "properties": {
+            "installed": { "type": "boolean" },
+            "project": { "type": "boolean" },
+            "global": { "type": "boolean" },
+            "count": { "type": "integer", "minimum": 0 },
+            "installations": { "type": "array", "items": { "$ref": "#/$defs/ListSkillItem" } }
+          },
+          "additionalProperties": true
         }
-      }
+      },
+      "additionalProperties": true
+    },
+    "CheckSummary": {
+      "type": "object",
+      "required": ["total", "updateAvailable", "upToDate", "uncheckable"],
+      "properties": {
+        "total": { "type": "integer", "minimum": 0 },
+        "updateAvailable": { "type": "integer", "minimum": 0 },
+        "upToDate": { "type": "integer", "minimum": 0 },
+        "uncheckable": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": true
+    },
+    "CheckSkillItem": {
+      "type": "object",
+      "required": ["name", "scope", "status", "source", "sourceType", "sourceUrl", "skillPath", "localHash", "remoteHash", "reason", "installedAt", "updatedAt"],
+      "properties": {
+        "name": { "type": "string" },
+        "scope": { "type": "string", "enum": ["project", "global"] },
+        "status": { "type": "string", "enum": ["update_available", "up_to_date", "uncheckable"] },
+        "source": { "type": "string" },
+        "sourceType": { "type": "string" },
+        "sourceUrl": { "type": "string" },
+        "skillPath": { "type": ["string", "null"] },
+        "localHash": { "type": ["string", "null"] },
+        "remoteHash": { "type": ["string", "null"] },
+        "reason": { "type": ["string", "null"] },
+        "installedAt": { "type": ["string", "null"] },
+        "updatedAt": { "type": ["string", "null"] }
+      },
+      "additionalProperties": true
+    },
+    "CheckResponse": {
+      "type": "object",
+      "required": ["ok", "scope", "requestedSkill", "count", "summary", "skills"],
+      "properties": {
+        "ok": { "const": true },
+        "scope": { "type": "string", "enum": ["project", "global"] },
+        "requestedSkill": { "type": ["string", "null"] },
+        "count": { "type": "integer", "minimum": 0 },
+        "summary": { "$ref": "#/$defs/CheckSummary" },
+        "skills": { "type": "array", "items": { "$ref": "#/$defs/CheckSkillItem" } }
+      },
+      "additionalProperties": true
+    },
+    "UpdateResultItem": {
+      "type": "object",
+      "required": ["skill", "status", "success", "checkStatus", "reason", "error", "source", "sourceUrl", "skillPath", "localHash", "remoteHash", "agents"],
+      "properties": {
+        "skill": { "type": "string" },
+        "status": { "type": "string", "enum": ["updated", "skipped", "failed"] },
+        "success": { "type": "boolean" },
+        "checkStatus": { "type": "string", "enum": ["update_available", "up_to_date", "uncheckable"] },
+        "reason": { "type": ["string", "null"] },
+        "error": { "type": ["string", "null"] },
+        "source": { "type": "string" },
+        "sourceUrl": { "type": "string" },
+        "skillPath": { "type": ["string", "null"] },
+        "localHash": { "type": ["string", "null"] },
+        "remoteHash": { "type": ["string", "null"] },
+        "agents": { "type": "array", "items": { "$ref": "#/$defs/AgentRef" } }
+      },
+      "additionalProperties": true
+    },
+    "UpdateResponse": {
+      "type": "object",
+      "required": ["ok", "action", "scope", "requestedSkill", "targetAgents", "check", "summary", "results"],
+      "properties": {
+        "ok": { "type": "boolean" },
+        "action": { "const": "update" },
+        "scope": { "type": "string", "enum": ["project", "global"] },
+        "requestedSkill": { "type": ["string", "null"] },
+        "targetAgents": { "type": "array", "items": { "$ref": "#/$defs/AgentRef" } },
+        "check": {
+          "type": "object",
+          "required": ["summary"],
+          "properties": { "summary": { "$ref": "#/$defs/CheckSummary" } },
+          "additionalProperties": true
+        },
+        "summary": {
+          "type": "object",
+          "required": ["checked", "updateAvailable", "updated", "skipped", "failed"],
+          "properties": {
+            "checked": { "type": "integer", "minimum": 0 },
+            "updateAvailable": { "type": "integer", "minimum": 0 },
+            "updated": { "type": "integer", "minimum": 0 },
+            "skipped": { "type": "integer", "minimum": 0 },
+            "failed": { "type": "integer", "minimum": 0 }
+          },
+          "additionalProperties": true
+        },
+        "results": { "type": "array", "items": { "$ref": "#/$defs/UpdateResultItem" } }
+      },
+      "additionalProperties": true
     },
     "RemoveFailedItem": {
       "type": "object",
       "required": ["agent", "error"],
       "properties": {
-        "agent": { "$ref": "#/$defs/AgentRef" },
+        "agent": { "anyOf": [{ "$ref": "#/$defs/AgentRef" }, { "type": "string" }] },
         "error": { "type": "string" }
-      }
+      },
+      "additionalProperties": true
     },
     "RemoveResponse": {
       "type": "object",
@@ -243,24 +396,14 @@
         "ok": { "type": "boolean" },
         "skill": { "type": "string" },
         "scope": { "type": "string", "enum": ["project", "global"] },
-        "requestedAgents": {
-          "type": "array",
-          "items": { "$ref": "#/$defs/AgentRef" }
-        },
-        "removedAgents": {
-          "type": "array",
-          "items": { "$ref": "#/$defs/AgentRef" }
-        },
-        "skippedAgents": {
-          "type": "array",
-          "items": { "$ref": "#/$defs/AgentRef" }
-        },
-        "failed": {
-          "type": "array",
-          "items": { "$ref": "#/$defs/RemoveFailedItem" }
-        },
-        "message": { "type": "string" }
-      }
+        "requestedAgents": { "type": "array", "items": { "$ref": "#/$defs/AgentRef" } },
+        "removedAgents": { "type": "array", "items": { "$ref": "#/$defs/AgentRef" } },
+        "skippedAgents": { "type": "array", "items": { "$ref": "#/$defs/AgentRef" } },
+        "failed": { "type": "array", "items": { "$ref": "#/$defs/RemoveFailedItem" } },
+        "message": { "type": "string" },
+        "hint": { "type": "string" }
+      },
+      "additionalProperties": true
     }
   }
 }
