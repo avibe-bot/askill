@@ -51,6 +51,8 @@ export interface SkillListResponse {
   };
 }
 
+export type SkillSort = 'llm_score' | 'popular_score' | 'stars' | 'updated' | 'name';
+
 export interface SearchResult {
   id: number;
   name: string | null;
@@ -171,7 +173,7 @@ class APIClient {
     tag?: string;
     owner?: string;
     repo?: string;
-    sort?: 'stars' | 'updated' | 'name';
+    sort?: SkillSort;
     order?: 'asc' | 'desc';
   } = {}): Promise<SkillListResponse> {
     const params = new URLSearchParams();
@@ -239,8 +241,19 @@ class APIClient {
   /**
    * Search for skills (uses listSkills with q parameter)
    */
-  async search(q: string, limit: number = 10): Promise<SkillListResponse> {
-    return this.listSkills({ q, limit });
+  async search(q: string, options: {
+    page?: number;
+    limit?: number;
+    sort?: SkillSort;
+    order?: 'asc' | 'desc';
+  } = {}): Promise<SkillListResponse> {
+    return this.listSkills({
+      q,
+      page: options.page,
+      limit: options.limit,
+      sort: options.sort,
+      order: options.order,
+    });
   }
 
   /**

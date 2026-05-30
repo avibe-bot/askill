@@ -48,7 +48,7 @@ strip_ansi() {
 # Check if cleaned output matches pattern (for inline use)
 output_matches() {
   local output="$1" pattern="$2"
-  echo "$output" | strip_ansi | grep -qi "$pattern"
+  echo "$output" | strip_ansi | grep -qi -- "$pattern"
 }
 
 # Assert output contains a string (ANSI-stripped)
@@ -3058,6 +3058,8 @@ test_find_json_output() {
       if (!Array.isArray(data.skills)) process.exit(1);
       if (typeof data.count !== "number") process.exit(1);
       if (data.count !== data.skills.length) process.exit(1);
+      if (!data.sort || data.sort.field !== "llm_score" || data.sort.order !== "desc") process.exit(1);
+      if (!data.pagination || typeof data.pagination.page !== "number") process.exit(1);
       if (data.skills.length > 0) {
         const first = data.skills[0];
         if (typeof first.name !== "string") process.exit(1);
@@ -3088,23 +3090,37 @@ test_dashboard_json_contracts() {
   local api_url="${registry_url}/api/v1"
 
   local find_output
-  find_output=$(cd "$WORKSPACE" && ASKILL_REGISTRY_URL="$registry_url" ASKILL_API_BASE_URL="$api_url" $CLI find --tag collection --limit 1 --page 1 --json 2>&1) || true
+  find_output=$(cd "$WORKSPACE" && ASKILL_REGISTRY_URL="$registry_url" ASKILL_API_BASE_URL="$api_url" $CLI find --tag collection --limit=1 --page=1 --json 2>&1) || true
   if echo "$find_output" | node -e '
     const fs = require("fs");
     const data = JSON.parse(fs.readFileSync(0, "utf8"));
     if (data.ok !== true) process.exit(1);
     if (!data.filters || data.filters.tag !== "collection") process.exit(1);
+    if (!data.sort || data.sort.field !== "llm_score" || data.sort.order !== "desc") process.exit(1);
     if (!data.pagination || data.pagination.page !== 1 || data.pagination.limit !== 1) process.exit(1);
     if (data.count !== 1 || !Array.isArray(data.skills) || data.skills.length !== 1) process.exit(1);
+    if (data.skills[0].name !== "beta-collection-skill") process.exit(1);
+    if (data.skills[0].aiScore !== 90) process.exit(1);
     if (!data.skills[0].tags.includes("collection")) process.exit(1);
   '; then
-    pass "find --json supports tag and pagination filters"
+    pass "find --json supports AI Picks sorting plus tag and pagination filters"
   else
     fail "find --json tag/pagination payload mismatch"
     echo "$find_output" | strip_ansi | head -10 | sed 's/^/    /'
     stop_mock_registry
     return
   fi
+
+  local find_nav_output
+  find_nav_output=$(cd "$WORKSPACE" && ASKILL_REGISTRY_URL="$registry_url" ASKILL_API_BASE_URL="$api_url" $CLI find --tag collection --limit 1 2>&1) || true
+  assert_contains "$find_nav_output" "Next:" "find output shows next-page label"
+  assert_contains "$find_nav_output" "--tag 'collection'" "find output shell-escapes tag argument"
+  assert_contains "$find_nav_output" "--page 2" "find output shows next-page number"
+
+  local find_escape_output
+  find_escape_output=$(cd "$WORKSPACE" && ASKILL_REGISTRY_URL="$registry_url" ASKILL_API_BASE_URL="$api_url" $CLI find 'shell $(unsafe)' --limit 1 2>&1) || true
+  assert_contains "$find_escape_output" "Next:" "find output shows next-page label for query"
+  assert_contains "$find_escape_output" "askill find 'shell \$(unsafe)' --limit 1 --page 2" "find output shell-escapes query argument"
 
   local info_output
   info_output=$(cd "$WORKSPACE" && ASKILL_REGISTRY_URL="$registry_url" ASKILL_API_BASE_URL="$api_url" $CLI info @mock/alpha --json 2>&1) || true

@@ -9,8 +9,10 @@ const skills = {
       id: 101,
       name: 'alpha-collection-skill',
       description: 'Alpha skill from shared collection',
-      tags: ['collection', 'alpha'],
+      tags: ['collection', 'alpha', 'shell $(unsafe)'],
       stars: 3,
+      llmScore: 40,
+      popularScore: 30,
       owner: 'mock',
       repo: 'skills',
       path: 'alpha',
@@ -31,8 +33,10 @@ version: 1.0.0
       id: 102,
       name: 'beta-collection-skill',
       description: 'Beta skill from shared collection',
-      tags: ['collection', 'beta'],
+      tags: ['collection', 'beta', 'shell $(unsafe)'],
       stars: 5,
+      llmScore: 90,
+      popularScore: 50,
       owner: 'mock',
       repo: 'skills',
       path: 'beta',
@@ -55,6 +59,8 @@ version: 1.0.0
       description: 'Alpha skill next major release',
       tags: ['collection', 'alpha'],
       stars: 7,
+      llmScore: 60,
+      popularScore: 70,
       owner: 'mock',
       repo: 'skills',
       path: 'alpha',
@@ -77,6 +83,8 @@ version: 2.0.0
       description: 'Alpha skill latest 1.x release',
       tags: ['collection', 'alpha'],
       stars: 8,
+      llmScore: 70,
+      popularScore: 80,
       owner: 'mock',
       repo: 'skills',
       path: 'alpha',
@@ -99,6 +107,8 @@ version: 1.1.0
       description: 'Alpha skill with renamed remote frontmatter',
       tags: ['collection', 'alpha'],
       stars: 9,
+      llmScore: 50,
+      popularScore: 90,
       owner: 'mock',
       repo: 'skills',
       path: 'alpha',
@@ -155,6 +165,37 @@ function rawForSkill(slug, raw) {
   return raw;
 }
 
+function sortValue(skill, sort) {
+  switch (sort) {
+    case 'llm_score':
+      return skill.llmScore ?? skill.aiScore ?? 0;
+    case 'popular_score':
+      return skill.popularScore ?? skill.stars ?? 0;
+    case 'stars':
+      return skill.stars ?? 0;
+    case 'updated':
+      return Date.parse(skill.updatedAt || '') || 0;
+    case 'name':
+      return skill.name || '';
+    default:
+      return null;
+  }
+}
+
+function sortSkills(items, sort, order) {
+  if (!sort) return items;
+  const direction = order === 'desc' ? -1 : 1;
+  return [...items].sort((left, right) => {
+    const leftValue = sortValue(left, sort);
+    const rightValue = sortValue(right, sort);
+    if (leftValue === null || rightValue === null) return 0;
+    if (typeof leftValue === 'string' || typeof rightValue === 'string') {
+      return String(leftValue).localeCompare(String(rightValue)) * direction;
+    }
+    return (Number(leftValue) - Number(rightValue)) * direction;
+  });
+}
+
 const server = createServer((req, res) => {
   const url = new URL(req.url || '/', `http://127.0.0.1:${port}`);
   const path = decodeURIComponent(url.pathname);
@@ -186,28 +227,33 @@ const server = createServer((req, res) => {
   if (path === '/api/v1/skills') {
     const query = (url.searchParams.get('q') || '').trim().toLowerCase();
     const tag = (url.searchParams.get('tag') || '').trim().toLowerCase();
+    const sort = (url.searchParams.get('sort') || '').trim();
+    const order = (url.searchParams.get('order') || 'asc').trim().toLowerCase();
     const page = parsePositiveInt(url.searchParams.get('page'), 1);
     const limit = parsePositiveInt(url.searchParams.get('limit'), 20);
 
-    const filtered = skillCatalog
-      .filter((skill) => {
+    const filtered = sortSkills(
+      skillCatalog.filter((skill) => {
         if (!query) return true;
-          const haystack = [
-            skill.name,
-            skill.description,
-            skill.owner,
-            skill.repo,
-            ...(Array.isArray(skill.tags) ? skill.tags : []),
-          ]
-            .filter(Boolean)
-            .join(' ')
-            .toLowerCase();
-          return haystack.includes(query);
+        const haystack = [
+          skill.name,
+          skill.description,
+          skill.owner,
+          skill.repo,
+          ...(Array.isArray(skill.tags) ? skill.tags : []),
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        return haystack.includes(query);
       })
-      .filter((skill) => {
-        if (!tag) return true;
-        return Array.isArray(skill.tags) && skill.tags.some((value) => String(value).toLowerCase() === tag);
-      });
+        .filter((skill) => {
+          if (!tag) return true;
+          return Array.isArray(skill.tags) && skill.tags.some((value) => String(value).toLowerCase() === tag);
+        }),
+      sort,
+      order
+    );
 
     const total = filtered.length;
     const totalPages = total === 0 ? 0 : Math.ceil(total / limit);

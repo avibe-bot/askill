@@ -44,7 +44,7 @@ GET /api/v1/skills
 | `tag` | string | 否 | 按标签筛选 |
 | `owner` | string | 否 | 按仓库所有者筛选 |
 | `repo` | string | 否 | 按仓库名筛选 |
-| `sort` | string | 否 | 排序: `stars`, `updated`, `name` |
+| `sort` | string | 否 | 排序: `llm_score`, `popular_score`, `stars`, `updated`, `name` |
 | `order` | string | 否 | 排序方向: `asc`, `desc` |
 
 **Response:**

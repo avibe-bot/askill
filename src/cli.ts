@@ -4,7 +4,7 @@
 // Install AI agent skills from askill.sh
 
 import { VERSION, REGISTRY_URL, RESET, BOLD, DIM, CYAN, GREEN, YELLOW, RED, GRAY, agents, AGENTS_DIR, SKILLS_SUBDIR, POPULAR_AGENTS, type AgentType } from './constants.ts';
-import { api, APIError, type Skill, type RepoSkill } from './api.ts';
+import { api, APIError, type Skill, type RepoSkill, type SkillSort } from './api.ts';
 import { installSkill, installSkillFromDir, detectInstalledAgents, listInstalledSkills, removeSkill, removeCanonicalSkill, sanitizeName, getCanonicalSkillsDir, type InstallMode, type InstalledSkill } from './installer.ts';
 import { getAvailableUpdate, selfUpdate } from './updater.ts';
 import { getPreferredAgents, savePreferredAgents } from './config.ts';
@@ -113,6 +113,9 @@ ${BOLD}Run Options:${RESET}
 
 ${BOLD}Search Options:${RESET}
   --full-desc             Show full skill descriptions in find/search
+  --tag <tag>             Filter by tag
+  --page <n>              Results page (default: 1)
+  --limit <n>             Results per page (default: 20, max: 100)
   --json                  Output machine-readable JSON
 
 ${BOLD}Options:${RESET}
@@ -260,7 +263,7 @@ function showCommandHelp(commandInput: string): boolean {
 
     list: `${BOLD}askill list${RESET}\n\nUsage:\n  askill list [options]\n\nDescription:\n  List installed skills and where they are available.\n\nOptions:\n  -g, --global            Show global skills only\n  -p, --project           Show project skills only\n  -a, --agent <agents...> Filter by agent(s)\n  --json                  Output machine-readable JSON\n\nExamples:\n  askill list\n  askill list -g\n  askill list -p -a opencode --json`,
 
-    find: `${BOLD}askill find${RESET}\n\nUsage:\n  askill find [query] [options]\n\nDescription:\n  Search indexed and published skills on askill.sh.\n\nOptions:\n  --full-desc             Show full descriptions\n  --tag <tag>             Filter by tag\n  --page <n>              Results page (default: 1)\n  --limit <n>             Results per page (default: 20)\n  --json                  Output machine-readable JSON\n\nExamples:\n  askill find memory\n  askill find code review --full-desc\n  askill find memory --tag productivity --limit 10 --json`,
+    find: `${BOLD}askill find${RESET}\n\nUsage:\n  askill find [query] [options]\n\nDescription:\n  Search indexed and published skills on askill.sh.\n  Default order matches Registry homepage AI Picks ranking (llm_score desc).\n\nOptions:\n  --full-desc             Show full descriptions\n  --tag <tag>             Filter by tag\n  --page <n>              Results page (default: 1)\n  --limit <n>             Results per page (default: 20, max: 100)\n  --json                  Output machine-readable JSON\n\nExamples:\n  askill find memory\n  askill find code review --full-desc\n  askill find memory --page 2 --limit 20\n  askill find memory --tag productivity --limit 10 --json`,
 
     info: `${BOLD}askill info${RESET}\n\nUsage:\n  askill info <slug> [options]\n\nDescription:\n  Show detailed metadata and installation info for one skill.\n\nOptions:\n  --json                  Output machine-readable JSON\n\nExamples:\n  askill info @johndoe/awesome-tool\n  askill info gh:facebook/react@extract-errors --json`,
 
@@ -1549,6 +1552,10 @@ async function runInstall(args: string[]): Promise<void> {
 // ============================================
 
 const SEARCH_DESCRIPTION_MAX_LENGTH = 500;
+const SEARCH_DEFAULT_LIMIT = 20;
+const SEARCH_MAX_LIMIT = 100;
+const SEARCH_DEFAULT_SORT: SkillSort = 'llm_score';
+const SEARCH_DEFAULT_ORDER: 'desc' = 'desc';
 
 interface SearchOptions {
   fullDesc: boolean;
@@ -1559,10 +1566,13 @@ interface SearchOptions {
   limit: number;
 }
 
-function parsePositiveIntegerOption(value: string | undefined, optionName: string): number {
+function parsePositiveIntegerOption(value: string | undefined, optionName: string, max?: number): number {
   const parsed = Number.parseInt(value || '', 10);
   if (!Number.isFinite(parsed) || parsed < 1) {
     throw new Error(`${optionName} must be a positive integer`);
+  }
+  if (max !== undefined && parsed > max) {
+    throw new Error(`${optionName} must be <= ${max}`);
   }
   return parsed;
 }
@@ -1731,7 +1741,7 @@ function parseSearchOptions(args: string[]): SearchOptions {
   let json = false;
   let tag: string | undefined;
   let page = 1;
-  let limit = 20;
+  let limit = SEARCH_DEFAULT_LIMIT;
   const queryParts: string[] = [];
 
   for (let index = 0; index < args.length; index += 1) {
@@ -1747,6 +1757,14 @@ function parseSearchOptions(args: string[]): SearchOptions {
       continue;
     }
 
+    if (arg.startsWith('--tag=')) {
+      tag = arg.slice('--tag='.length);
+      if (!tag) {
+        throw new Error('--tag requires a value');
+      }
+      continue;
+    }
+
     if (arg === '--tag') {
       tag = args[index + 1];
       if (!tag || tag.startsWith('-')) {
@@ -1756,14 +1774,24 @@ function parseSearchOptions(args: string[]): SearchOptions {
       continue;
     }
 
+    if (arg.startsWith('--page=')) {
+      page = parsePositiveIntegerOption(arg.slice('--page='.length), '--page');
+      continue;
+    }
+
     if (arg === '--page') {
       page = parsePositiveIntegerOption(args[index + 1], '--page');
       index += 1;
       continue;
     }
 
+    if (arg.startsWith('--limit=')) {
+      limit = parsePositiveIntegerOption(arg.slice('--limit='.length), '--limit', SEARCH_MAX_LIMIT);
+      continue;
+    }
+
     if (arg === '--limit') {
-      limit = parsePositiveIntegerOption(args[index + 1], '--limit');
+      limit = parsePositiveIntegerOption(args[index + 1], '--limit', SEARCH_MAX_LIMIT);
       index += 1;
       continue;
     }
@@ -1781,6 +1809,31 @@ function parseSearchOptions(args: string[]): SearchOptions {
     page,
     limit,
   };
+}
+
+function shellEscapeArg(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function buildFindCommand(query: string, tag: string | undefined, page: number, limit: number, fullDesc: boolean): string {
+  const parts = ['askill find'];
+  if (query) {
+    parts.push(shellEscapeArg(query));
+  }
+  if (tag) {
+    parts.push(`--tag ${shellEscapeArg(tag)}`);
+  }
+  if (fullDesc) {
+    parts.push('--full-desc');
+  }
+  if (limit !== SEARCH_DEFAULT_LIMIT) {
+    parts.push(`--limit ${limit}`);
+  }
+  if (page > 1) {
+    parts.push(`--page ${page}`);
+  }
+
+  return parts.join(' ');
 }
 
 async function runSearch(args: string[]): Promise<void> {
@@ -1803,7 +1856,11 @@ async function runSearch(args: string[]): Promise<void> {
   }
 
   const spinner = createSpinner(json);
-  const searchLabel = query ? `Searching for "${query}"...` : tag ? `Loading skills tagged "${tag}"...` : 'Loading skills...';
+  const searchLabel = query
+    ? `Searching for "${query}" (page ${page})...`
+    : tag
+      ? `Loading skills tagged "${tag}" (page ${page})...`
+      : `Loading skills (page ${page})...`;
   spinner.start(searchLabel);
 
   try {
@@ -1812,10 +1869,18 @@ async function runSearch(args: string[]): Promise<void> {
       tag,
       page,
       limit,
+      sort: SEARCH_DEFAULT_SORT,
+      order: SEARCH_DEFAULT_ORDER,
     });
 
     const skills = response.data || [];
-    spinner.stop(`Found ${skills.length} result(s)`);
+    const pagination = response.pagination || {
+      page,
+      limit,
+      total: skills.length,
+      totalPages: skills.length === 0 ? 0 : 1,
+    };
+    spinner.stop(`Found ${pagination.total} result(s), page ${pagination.page}/${pagination.totalPages}`);
 
     const normalized = skills.map((skill) => {
       const displayName = skill.name || 'unknown';
@@ -1852,15 +1917,10 @@ async function runSearch(args: string[]): Promise<void> {
           tag: tag || null,
         },
         sort: {
-          field: null,
-          order: null,
+          field: SEARCH_DEFAULT_SORT,
+          order: SEARCH_DEFAULT_ORDER,
         },
-        pagination: response.pagination || {
-          page,
-          limit,
-          total: normalized.length,
-          totalPages: normalized.length === 0 ? 0 : 1,
-        },
+        pagination,
         count: normalized.length,
         skills: normalized,
       });
@@ -1868,7 +1928,11 @@ async function runSearch(args: string[]): Promise<void> {
     }
 
     if (skills.length === 0) {
-      p.log.info('No skills found');
+      if (pagination.page > 1) {
+        p.log.info(`No skills found on page ${pagination.page}`);
+      } else {
+        p.log.info('No skills found');
+      }
       p.outro(`Browse all skills at ${pc.cyan('https://askill.sh')}`);
       return;
     }
@@ -1897,6 +1961,17 @@ async function runSearch(args: string[]): Promise<void> {
       // Show web link for sharing
       if (skill.id) {
         console.log(`  ${pc.dim(REGISTRY_URL + '/skills/' + skill.id)}`);
+      }
+      console.log();
+    }
+
+    if (pagination.totalPages > 1) {
+      console.log(`  ${pc.dim(`Page ${pagination.page}/${pagination.totalPages} · ${pagination.total} total`)}`);
+      if (pagination.page > 1) {
+        console.log(`  ${pc.dim('Prev:')} ${buildFindCommand(query, tag, pagination.page - 1, pagination.limit, fullDesc)}`);
+      }
+      if (pagination.page < pagination.totalPages) {
+        console.log(`  ${pc.dim('Next:')} ${buildFindCommand(query, tag, pagination.page + 1, pagination.limit, fullDesc)}`);
       }
       console.log();
     }

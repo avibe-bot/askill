@@ -191,6 +191,7 @@ Installed skills:
 ## askill find
 
 Search for skills on askill.sh.
+Default ranking follows Registry homepage AI Picks order (`llm_score` descending).
 
 ### Usage
 
@@ -204,7 +205,7 @@ askill find [query] [options]
 |--------|-------------|
 | `--tag <tag>` | Filter by tag |
 | `--page <n>` | Results page (default: 1) |
-| `--limit <n>` | Number of results per page (default: 20) |
+| `--limit <n>` | Number of results per page (default: 20, max: 100) |
 | `--json` | Output machine-readable JSON |
 
 ### Examples
@@ -218,6 +219,9 @@ askill find memory
 
 # Search by multiple keywords
 askill find code review
+
+# Pagination
+askill find memory --page 2 --limit 20
 
 # Machine-readable results for web integrations
 askill find memory --json
