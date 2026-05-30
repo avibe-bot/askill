@@ -165,7 +165,7 @@
     },
     "FindResponse": {
       "type": "object",
-      "required": ["ok", "query", "filters", "pagination", "count", "skills"],
+      "required": ["ok", "query", "filters", "sort", "pagination", "count", "skills"],
       "properties": {
         "ok": { "const": true },
         "query": { "type": "string" },
@@ -175,7 +175,18 @@
           "properties": { "tag": { "type": ["string", "null"] } },
           "additionalProperties": true
         },
-        "sort": { "type": "object" },
+        "sort": {
+          "type": "object",
+          "required": ["field", "order"],
+          "properties": {
+            "field": {
+              "type": "string",
+              "enum": ["llm_score", "popular_score", "stars", "updated", "name"]
+            },
+            "order": { "type": "string", "enum": ["asc", "desc"] }
+          },
+          "additionalProperties": true
+        },
         "pagination": { "$ref": "#/$defs/Pagination" },
         "count": { "type": "integer", "minimum": 0 },
         "skills": { "type": "array", "items": { "$ref": "#/$defs/FindSkillItem" } }
