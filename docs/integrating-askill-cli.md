@@ -156,6 +156,12 @@ askill add owner/repo@skill-name -g -a opencode -y --json
 
 # install all discovered skills
 askill add ./skills --all -a opencode -y --json
+
+# install one selected skill from a local multi-skill source
+askill add ./skills --skill skill-name -a opencode -y --json
+
+# link an already-installed canonical skill to another agent
+askill add .agents/skills/skill-name -a codex -y --json
 ```
 
 Typical fields:
@@ -166,6 +172,8 @@ Typical fields:
 - `requestedSkills[]`
 - `summary` (`operations`, `successful`, `failed`, `skills`, `dependencies`)
 - `results[]` (per skill + per agent)
+
+For GitHub sources, `owner/repo@skill-name` remains the compact non-interactive selector. For local directories, use `--skill <name>` so paths containing `@` stay unambiguous. Re-linking from `.agents/skills/<name>` is idempotent and preserves the existing lock source metadata.
 
 ### Check update status
 
@@ -182,7 +190,7 @@ Typical fields:
 - `scope` (`project` | `global`)
 - `requestedSkill`
 - `summary` (`total`, `updateAvailable`, `upToDate`, `uncheckable`)
-- `skills[]` with `status` (`update_available` | `up_to_date` | `uncheckable`), source metadata, hashes, and `reason`
+- `skills[]` with `status` (`update_available` | `up_to_date` | `uncheckable`), source metadata, hashes or versions, and `reason`
 
 ### Update skills
 
@@ -200,7 +208,7 @@ Typical fields:
 - `targetAgents[]`
 - `check.summary`
 - `summary` (`checked`, `updateAvailable`, `updated`, `skipped`, `failed`)
-- `results[]` with `status` (`updated` | `skipped` | `failed`), `checkStatus`, `reason`, `error`, source metadata, hashes, and agents
+- `results[]` with `status` (`updated` | `skipped` | `failed`), `checkStatus`, `reason`, `error`, source metadata, hashes or versions, and agents
 
 ### Remove skills
 

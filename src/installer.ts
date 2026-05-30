@@ -196,17 +196,25 @@ export async function installSkillFromDir(
 
   const { canonicalDir, agentDir } = paths;
   const installMode = options.mode ?? 'symlink';
+  const resolvedSkillDir = normalize(resolve(skillDir));
+  const resolvedCanonicalDir = normalize(resolve(canonicalDir));
+  const resolvedAgentDir = normalize(resolve(agentDir));
 
   try {
     if (installMode === 'copy') {
+      if (resolvedSkillDir === resolvedAgentDir) {
+        return { success: true, path: agentDir, mode: 'copy' };
+      }
       await cleanAndCreateDirectory(agentDir);
       await copySkillDirectory(skillDir, agentDir);
       return { success: true, path: agentDir, mode: 'copy' };
     }
 
     // Symlink mode: copy to canonical, symlink to agent
-    await cleanAndCreateDirectory(canonicalDir);
-    await copySkillDirectory(skillDir, canonicalDir);
+    if (resolvedSkillDir !== resolvedCanonicalDir) {
+      await cleanAndCreateDirectory(canonicalDir);
+      await copySkillDirectory(skillDir, canonicalDir);
+    }
 
     const symlinkCreated = await createSymlink(canonicalDir, agentDir);
 

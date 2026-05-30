@@ -5,7 +5,7 @@
 
 import { VERSION, REGISTRY_URL, RESET, BOLD, DIM, CYAN, GREEN, YELLOW, RED, GRAY, agents, AGENTS_DIR, SKILLS_SUBDIR, POPULAR_AGENTS, type AgentType } from './constants.ts';
 import { api, APIError, type Skill, type RepoSkill } from './api.ts';
-import { installSkill, installSkillFromDir, detectInstalledAgents, listInstalledSkills, removeSkill, removeCanonicalSkill, sanitizeName, type InstallMode, type InstalledSkill } from './installer.ts';
+import { installSkill, installSkillFromDir, detectInstalledAgents, listInstalledSkills, removeSkill, removeCanonicalSkill, sanitizeName, getCanonicalSkillsDir, type InstallMode, type InstalledSkill } from './installer.ts';
 import { getAvailableUpdate, selfUpdate } from './updater.ts';
 import { getPreferredAgents, savePreferredAgents } from './config.ts';
 import { loadCredentials, saveCredentials, clearCredentials, maskToken } from './credentials.ts';
@@ -16,11 +16,12 @@ import { getCollectionInstallRefs } from './collection.ts';
 import { cloneRepo, cleanupTempDir, GitCloneError } from './git.ts';
 import { addSkillToLock, removeSkillFromLock, fetchSkillFolderHash, saveLastSelectedAgents, getLastSelectedAgents, getAllLockedSkills, type SkillLockEntry } from './lock.ts';
 import { resolveRemoveTarget, isPathLikeRemoveTarget } from './remove-target.ts';
-import { join } from 'path';
+import { join, normalize, resolve } from 'path';
 import { homedir } from 'os';
-import { readFile } from 'fs/promises';
+import { access, readFile } from 'fs/promises';
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
+import semver from 'semver';
 
 // ============================================
 // Logo and Banner
@@ -105,6 +106,7 @@ ${BOLD}Install Options:${RESET}
   --copy                Copy files instead of symlink
   -l, --list            Preview skills in a repo without installing
   --all                 Install all discovered skills (skip selection)
+  --skill <name>        Install one skill from a multi-skill source
 
 ${BOLD}Run Options:${RESET}
   askill run <skill>:<command>      Run a skill's command
@@ -252,7 +254,7 @@ function showCommandHelp(commandInput: string): boolean {
   const command = normalizeCommand(commandInput);
 
   const helps: Record<string, string> = {
-    add: `${BOLD}askill add${RESET}\n\nUsage:\n  askill add <source> [options]\n\nDescription:\n  Install skills from published slugs, GitHub, local directories, or shared collections.\n\nSources:\n  @author/skill-name\n  col:owner/collection-handle\n  https://askill.sh/c/owner/handle\n  gh:owner/repo@skill-name\n  gh:owner/repo/path/to/skill\n  owner/repo\n  ./local/path\n\nScope:\n  default: current project (.agents/skills/)\n  -g, --global: user-level install\n\nOptions:\n  -g, --global            Install globally\n  -a, --agent <agents...> Install to specific agents\n  -y, --yes               Skip confirmation prompts\n  --copy                  Copy files instead of symlink\n  -l, --list              Preview discovered skills only\n  --all                   Install all discovered skills\n  --json                  Output machine-readable JSON\n\nExamples:\n  askill add @johndoe/awesome-tool -y\n  askill add col:acme/dev-tools -y\n  askill add gh:facebook/react@extract-errors\n  askill add owner/repo --all -a claude-code opencode -y\n\nGuide:\n  https://github.com/avibe-bot/askill/tree/main/skills/discover-a-skill`,
+    add: `${BOLD}askill add${RESET}\n\nUsage:\n  askill add <source> [options]\n\nDescription:\n  Install skills from published slugs, GitHub, local directories, or shared collections.\n\nSources:\n  @author/skill-name\n  col:owner/collection-handle\n  https://askill.sh/c/owner/handle\n  gh:owner/repo@skill-name\n  gh:owner/repo/path/to/skill\n  owner/repo\n  ./local/path\n\nScope:\n  default: current project (.agents/skills/)\n  -g, --global: user-level install\n\nOptions:\n  -g, --global            Install globally\n  -a, --agent <agents...> Install to specific agents\n  -y, --yes               Skip confirmation prompts\n  --copy                  Copy files instead of symlink\n  -l, --list              Preview discovered skills only\n  --all                   Install all discovered skills\n  --skill <name>          Install one skill from a multi-skill source\n  --json                  Output machine-readable JSON\n\nExamples:\n  askill add @johndoe/awesome-tool -y\n  askill add col:acme/dev-tools -y\n  askill add gh:facebook/react@extract-errors\n  askill add ./skills --skill formatter -a opencode -y\n  askill add owner/repo --all -a claude-code opencode -y\n\nGuide:\n  https://github.com/avibe-bot/askill/tree/main/skills/discover-a-skill`,
 
     remove: `${BOLD}askill remove${RESET}\n\nUsage:\n  askill remove <skill-or-path> [options]\n\nDescription:\n  Remove an installed skill by name or installed path.\n\nOptions:\n  -g, --global            Remove global installation\n  -a, --agent <agents...> Remove only from specific agents\n  --json                  Output machine-readable JSON\n\nExamples:\n  askill remove memory\n  askill remove .agents/skills/memory\n  askill remove memory -g\n  askill remove memory -a opencode codex --json`,
 
@@ -316,6 +318,8 @@ async function maybeAutoUpgradeOnStartup(commandInput: string): Promise<void> {
 interface InstallOptions {
   global?: boolean;
   agent?: string[];
+  skill?: string;
+  skillOptionMissing?: boolean;
   yes?: boolean;
   copy?: boolean;
   list?: boolean;
@@ -342,6 +346,13 @@ function parseInstallOptions(args: string[]): { skillName: string; options: Inst
       options.all = true;
     } else if (arg === '--json') {
       options.json = true;
+    } else if (arg === '--skill') {
+      if (args[i + 1] && !args[i + 1].startsWith('-')) {
+        options.skill = args[i + 1];
+        i += 1;
+      } else {
+        options.skillOptionMissing = true;
+      }
     } else if (arg === '-a' || arg === '--agent') {
       const parsed = parseAgentOptionValues(args, i + 1);
       options.agent = parsed.values;
@@ -369,6 +380,10 @@ async function resolveSkills(
 }> {
   const parsed = parseSource(source);
 
+  const applyExplicitSkillFilter = (skills: DiscoveredSkill[]): DiscoveredSkill[] => {
+    return options.skill ? filterSkills(skills, [options.skill]) : skills;
+  };
+
   // Shared collection: resolve all included skills via askill API
   if (parsed.type === 'collection') {
     const collectionOwner = parsed.collectionOwner || '';
@@ -379,10 +394,13 @@ async function resolveSkills(
     spinner.stop(`Collection ${collectionOwner}/${collectionHandle}: ${collection.skills.length} skill(s)`);
     spinner.start(`Resolving skills...`);
 
+    const collectionItems = options.skill
+      ? collection.skills.filter((item) => !item.skillName || item.skillName.toLowerCase() === options.skill!.toLowerCase())
+      : collection.skills;
     const resolvedSkills: DiscoveredSkill[] = [];
     const skippedRefs: string[] = [];
     const nestedSpinner = createSpinner(true);
-    for (const item of collection.skills) {
+    for (const item of collectionItems) {
       const refsToTry = getCollectionInstallRefs(item);
       let resolved = false;
 
@@ -421,11 +439,11 @@ async function resolveSkills(
       }
     }
 
-    if (collection.skills.length > 0 && resolvedSkills.length === 0) {
+    if (collectionItems.length > 0 && resolvedSkills.length === 0 && !options.skill) {
       throw new Error(`Collection ${collectionOwner}/${collectionHandle} does not contain any installable skills`);
     }
 
-    spinner.stop(`Found ${resolvedSkills.length}/${collection.skills.length} skill(s) in collection`);
+    spinner.stop(`Found ${resolvedSkills.length}/${collectionItems.length} skill(s) in collection`);
     if (skippedRefs.length > 0 && !options.json) {
       p.log.warning(`Skipped ${skippedRefs.length} collection entr${skippedRefs.length === 1 ? 'y' : 'ies'} that could not be resolved`);
       for (const skippedRef of skippedRefs.slice(0, 5)) {
@@ -435,7 +453,7 @@ async function resolveSkills(
         console.log(`  ${pc.dim(`...and ${skippedRefs.length - 5} more`)}`);
       }
     }
-    return { skills: resolvedSkills, parsed };
+    return { skills: applyExplicitSkillFilter(resolvedSkills), parsed };
   }
 
   // Published slug: resolve via registry API
@@ -452,13 +470,13 @@ async function resolveSkills(
     spinner.stop(`Found: ${pc.cyan(name)}`);
 
     return {
-      skills: [{
+      skills: applyExplicitSkillFilter([{
         name,
         description,
         path: '',
         rawContent: content,
         frontmatter: parsedContent.frontmatter,
-      }],
+      }]),
       parsed,
     };
   }
@@ -466,7 +484,7 @@ async function resolveSkills(
   // Local path: discover directly
   if (parsed.type === 'local') {
     spinner.start(`Scanning ${source}...`);
-    const skills = await discoverSkills(parsed.localPath!);
+    const skills = applyExplicitSkillFilter(await discoverSkills(parsed.localPath!));
     spinner.stop(`Found ${skills.length} skill(s) in ${pc.cyan(source)}`);
     return { skills, parsed };
   }
@@ -486,6 +504,7 @@ async function resolveSkills(
       if (parsed.skillFilter) {
         skills = filterSkills(skills, [parsed.skillFilter]);
       }
+      skills = applyExplicitSkillFilter(skills);
 
       spinner.stop(`Found ${skills.length} skill(s)`);
       return { skills, parsed, tempDir };
@@ -540,6 +559,9 @@ async function resolveSkillsViaApi(
   options: InstallOptions,
 ): Promise<{ skills: DiscoveredSkill[]; parsed: ParsedSource }> {
   const { owner, repo, skillFilter, subpath } = parsed;
+  const applyExplicitSkillFilter = (skills: DiscoveredSkill[]): DiscoveredSkill[] => {
+    return options.skill ? filterSkills(skills, [options.skill]) : skills;
+  };
 
   if (skillFilter) {
     // owner/repo@skill
@@ -550,13 +572,13 @@ async function resolveSkillsViaApi(
     spinner.stop(`Found: ${pc.cyan(skill.name)}`);
 
     return {
-      skills: [{
+      skills: applyExplicitSkillFilter([{
         name: skill.name || 'unknown',
         description: skill.description || '',
         path: '',  // No local path (API-only)
         rawContent: content,
         frontmatter: { name: skill.name || undefined, description: skill.description || undefined },
-      }],
+      }]),
       parsed,
     };
   }
@@ -573,13 +595,13 @@ async function resolveSkillsViaApi(
     spinner.stop(`Found: ${pc.cyan(skill.name)}`);
 
     return {
-      skills: [{
+      skills: applyExplicitSkillFilter([{
         name: skill.name || 'unknown',
         description: skill.description || '',
         path: '',
         rawContent: content,
         frontmatter: { name: skill.name || undefined, description: skill.description || undefined },
-      }],
+      }]),
       parsed,
     };
   }
@@ -606,7 +628,7 @@ async function resolveSkillsViaApi(
     }
   }
 
-  return { skills: results, parsed };
+  return { skills: applyExplicitSkillFilter(results), parsed };
 }
 
 function toLockSource(sourceParsed: ParsedSource, fallback: string): string {
@@ -652,7 +674,27 @@ function toSkillSourceHint(input: string): DiscoveredSkill['sourceHint'] | undef
   };
 }
 
+function isCanonicalSkillPath(skillName: string, skillPath: string | undefined, globalScope: boolean): boolean {
+  if (!skillPath) return false;
+  const canonicalPath = join(getCanonicalSkillsDir(globalScope), sanitizeName(skillName));
+  return normalize(resolve(skillPath)) === normalize(resolve(canonicalPath));
+}
+
+async function shouldPreserveExistingLockForCanonicalRelink(
+  skillName: string,
+  skillPath: string | undefined,
+  globalScope: boolean
+): Promise<boolean> {
+  if (!isCanonicalSkillPath(skillName, skillPath, globalScope)) return false;
+  const existingLocks = await getAllLockedSkills({ global: globalScope }).catch(() => ({} as Record<string, SkillLockEntry>));
+  return Boolean(existingLocks[skillName] || existingLocks[sanitizeName(skillName)]);
+}
+
 async function runInstallJson(skillName: string, options: InstallOptions): Promise<void> {
+  if (options.skillOptionMissing) {
+    printJsonError('MISSING_SKILL_OPTION_VALUE', '--skill requires a value');
+  }
+
   if (!skillName) {
     printJsonError('MISSING_SKILL', 'Missing skill identifier');
   }
@@ -666,6 +708,22 @@ async function runInstallJson(skillName: string, options: InstallOptions): Promi
 
   try {
     if (discoveredSkills.length === 0) {
+      if (options.skill) {
+        printJson({
+          ok: false,
+          error: {
+            code: 'SKILL_NOT_FOUND',
+            message: `Skill "${options.skill}" not found in source`,
+            details: {
+              source: skillName,
+              requestedSkill: options.skill,
+            },
+          },
+        });
+        process.exitCode = 1;
+        return;
+      }
+
       printJson({
         ok: true,
         action: options.list ? 'preview' : 'install',
@@ -896,6 +954,10 @@ async function runInstallJson(skillName: string, options: InstallOptions): Promi
       for (const installedSkillName of installedSkillNames) {
         const discoveredSkill = skillsToInstall.find((skill) => skill.name === installedSkillName);
 
+        if (await shouldPreserveExistingLockForCanonicalRelink(installedSkillName, discoveredSkill?.path, installGlobally)) {
+          continue;
+        }
+
         const effectiveSource = discoveredSkill?.sourceHint;
         const source = effectiveSource?.source || toLockSource(sourceParsed, skillName);
         const sourceType = effectiveSource?.sourceType || (sourceParsed.type === 'local' ? 'local' : sourceParsed.type);
@@ -990,6 +1052,16 @@ async function runInstallJson(skillName: string, options: InstallOptions): Promi
 
 async function runInstall(args: string[]): Promise<void> {
   const { skillName, options } = parseInstallOptions(args);
+  if (options.skillOptionMissing) {
+    if (options.json) {
+      printJsonError('MISSING_SKILL_OPTION_VALUE', '--skill requires a value');
+    }
+
+    console.log(`${RED}Error: --skill requires a value${RESET}`);
+    console.log(`Usage: askill add <source> --skill <name>`);
+    process.exit(1);
+  }
+
   if (options.json) {
     await runInstallJson(skillName, options);
     return;
@@ -1030,6 +1102,12 @@ async function runInstall(args: string[]): Promise<void> {
   try {
 
   if (discoveredSkills.length === 0) {
+    if (options.skill) {
+      p.log.error(`Skill "${options.skill}" not found in ${pc.cyan(skillName)}`);
+      process.exitCode = 1;
+      return;
+    }
+
     p.log.warning('No skills found');
     if (plainMode) {
       console.log(`Browse skills at ${pc.cyan('https://askill.sh')}`);
@@ -1351,6 +1429,10 @@ async function runInstall(args: string[]): Promise<void> {
     for (const skillName of installedSkillNames) {
       // Find the DiscoveredSkill for this name (from main install or dependency)
       const discoveredSkill = skillsToInstall.find((s) => s.name === skillName);
+
+      if (await shouldPreserveExistingLockForCanonicalRelink(skillName, discoveredSkill?.path, installGlobally)) {
+        continue;
+      }
 
       // Determine source info from parsed source
       const effectiveSource = discoveredSkill?.sourceHint;
@@ -2568,6 +2650,8 @@ interface SkillCheckResult {
   skillPath: string | null;
   localHash: string | null;
   remoteHash: string | null;
+  localVersion: string | null;
+  remoteVersion: string | null;
   reason: string | null;
   installedAt: string | null;
   updatedAt: string | null;
@@ -2600,7 +2684,7 @@ function uncheckableReason(entry: SkillLockEntry): string | null {
   if (entry.sourceType !== 'github' || !entry.source) {
     if (entry.sourceType === 'local') return 'local source';
     if (entry.sourceType === 'collection') return 'installed from shared collection (reinstall collection to refresh)';
-    if (entry.sourceType === 'registry') return 'registry source does not include an update hash';
+    if (entry.sourceType === 'registry') return null;
     return 'source type not auto-checkable';
   }
 
@@ -2609,6 +2693,177 @@ function uncheckableReason(entry: SkillLockEntry): string | null {
   }
 
   return null;
+}
+
+function registryLookupSlug(source: string): string {
+  const parsed = parseRegistrySource(source);
+  return parsed.range ? source : parsed.slug;
+}
+
+function parseRegistrySource(source: string): { slug: string; range: string | null } {
+  const match = source.match(/^(@[^/]+\/[^@/]+)(?:@(.+))?$/);
+  return match ? { slug: match[1], range: match[2] || null } : { slug: source, range: null };
+}
+
+function compareVersionStrings(localVersion: string, remoteVersion: string): number {
+  const local = semver.valid(localVersion.trim());
+  const remote = semver.valid(remoteVersion.trim());
+  if (local && remote) return semver.compare(remote, local);
+
+  return remoteVersion.trim() === localVersion.trim() ? 0 : 1;
+}
+
+function formatCheckDelta(result: Pick<SkillCheckResult, 'localHash' | 'remoteHash' | 'localVersion' | 'remoteVersion'>): string {
+  if (result.localVersion || result.remoteVersion) {
+    return `${result.localVersion || '?'} → ${result.remoteVersion || '?'}`;
+  }
+
+  if (result.localHash || result.remoteHash) {
+    return `${result.localHash?.slice(0, 8) || '?'} → ${result.remoteHash?.slice(0, 8) || '?'}`;
+  }
+
+  return 'unknown change';
+}
+
+async function getInstalledSkillVersion(skillName: string, globalScope: boolean): Promise<string | null> {
+  const sanitizedName = sanitizeName(skillName);
+  const installedSkills = await listInstalledSkills({ global: globalScope });
+  const installed = installedSkills.find((skill) => (
+    skill.name === skillName || sanitizeName(skill.name) === sanitizedName
+  ));
+  if (installed) {
+    const frontmatter = await readInstalledSkillFrontmatter(installed);
+    const version = stringOrNull(frontmatter.version);
+    if (version) return version;
+  }
+
+  const lastAgents = await getLastSelectedAgents({ global: globalScope }).catch(() => undefined);
+  const candidateAgents = Array.from(new Set([...(lastAgents || []), ...Object.keys(agents)]))
+    .filter((agent): agent is AgentType => Boolean(agents[agent]));
+
+  for (const agentType of candidateAgents) {
+    const agent = agents[agentType];
+    if (globalScope && !agent.globalSkillsDir) continue;
+
+    const baseDir = globalScope ? agent.globalSkillsDir! : join(process.cwd(), agent.skillsDir);
+    const version = await readSkillVersionFromDir(join(baseDir, sanitizedName));
+    if (version) return version;
+  }
+
+  return null;
+}
+
+async function readSkillVersionFromDir(skillDir: string): Promise<string | null> {
+  try {
+    const content = await readFile(join(skillDir, 'SKILL.md'), 'utf-8');
+    return stringOrNull(parseSkillMd(content).frontmatter.version);
+  } catch {
+    return null;
+  }
+}
+
+async function hasSkillMd(skillDir: string): Promise<boolean> {
+  try {
+    await access(join(skillDir, 'SKILL.md'));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function getRegistrySkillVersion(source: string): Promise<string | null> {
+  const content = await api.getSkillRaw(registryLookupSlug(source));
+  return stringOrNull(parseSkillMd(content).frontmatter.version);
+}
+
+async function checkRegistrySkillVersion(
+  name: string,
+  entry: SkillLockEntry,
+  scope: 'project' | 'global',
+  base: Omit<SkillCheckResult, 'status' | 'remoteHash' | 'remoteVersion' | 'reason'>
+): Promise<SkillCheckResult> {
+  try {
+    const localVersion = await getInstalledSkillVersion(name, scope === 'global');
+    const remoteVersion = await getRegistrySkillVersion(entry.source || entry.sourceUrl);
+
+    if (!localVersion) {
+      return {
+        ...base,
+        localVersion: null,
+        remoteHash: null,
+        remoteVersion,
+        status: 'uncheckable',
+        reason: 'no local version recorded',
+      };
+    }
+
+    if (!remoteVersion) {
+      return {
+        ...base,
+        localVersion,
+        remoteHash: null,
+        remoteVersion: null,
+        status: 'uncheckable',
+        reason: 'no registry version available',
+      };
+    }
+
+    const registryRange = parseRegistrySource(entry.source || entry.sourceUrl).range;
+    if (registryRange) {
+      const validRange = semver.validRange(registryRange);
+      if (!validRange) {
+        return {
+          ...base,
+          localVersion,
+          remoteHash: null,
+          remoteVersion,
+          status: 'uncheckable',
+          reason: `invalid registry version range: ${registryRange}`,
+        };
+      }
+
+      const validRemoteVersion = semver.valid(remoteVersion);
+      if (!validRemoteVersion) {
+        return {
+          ...base,
+          localVersion,
+          remoteHash: null,
+          remoteVersion,
+          status: 'uncheckable',
+          reason: 'registry version is not valid semver',
+        };
+      }
+
+      if (!semver.satisfies(validRemoteVersion, validRange)) {
+        return {
+          ...base,
+          localVersion,
+          remoteHash: null,
+          remoteVersion,
+          status: 'up_to_date',
+          reason: `latest registry version ${remoteVersion} is outside locked range ${registryRange}`,
+        };
+      }
+    }
+
+    return {
+      ...base,
+      localVersion,
+      remoteHash: null,
+      remoteVersion,
+      status: compareVersionStrings(localVersion, remoteVersion) > 0 ? 'update_available' : 'up_to_date',
+      reason: null,
+    };
+  } catch {
+    return {
+      ...base,
+      localVersion: null,
+      remoteHash: null,
+      remoteVersion: null,
+      status: 'uncheckable',
+      reason: 'failed to check registry version',
+    };
+  }
 }
 
 async function buildCheckPayload(options: ScopedSkillOptions): Promise<SkillCheckPayload> {
@@ -2626,6 +2881,7 @@ async function buildCheckPayload(options: ScopedSkillOptions): Promise<SkillChec
       sourceUrl: entry.sourceUrl,
       skillPath: entry.skillPath || null,
       localHash: entry.skillFolderHash || null,
+      localVersion: null,
       installedAt: entry.installedAt || null,
       updatedAt: entry.updatedAt || null,
     };
@@ -2636,8 +2892,14 @@ async function buildCheckPayload(options: ScopedSkillOptions): Promise<SkillChec
         ...base,
         status: 'uncheckable',
         remoteHash: null,
+        remoteVersion: null,
         reason,
       });
+      continue;
+    }
+
+    if (entry.sourceType === 'registry') {
+      results.push(await checkRegistrySkillVersion(name, entry, scope, base));
       continue;
     }
 
@@ -2649,6 +2911,7 @@ async function buildCheckPayload(options: ScopedSkillOptions): Promise<SkillChec
           ...base,
           status: 'uncheckable',
           remoteHash: null,
+          remoteVersion: null,
           reason: 'could not fetch remote hash',
         });
         continue;
@@ -2658,6 +2921,7 @@ async function buildCheckPayload(options: ScopedSkillOptions): Promise<SkillChec
         ...base,
         status: remoteHash !== entry.skillFolderHash ? 'update_available' : 'up_to_date',
         remoteHash,
+        remoteVersion: null,
         reason: null,
       });
     } catch {
@@ -2665,6 +2929,7 @@ async function buildCheckPayload(options: ScopedSkillOptions): Promise<SkillChec
         ...base,
         status: 'uncheckable',
         remoteHash: null,
+        remoteVersion: null,
         reason: 'failed to check remote',
       });
     }
@@ -2712,52 +2977,14 @@ async function runCheck(args: string[]): Promise<void> {
   spinner.stop(`Found ${skillEntries.length} tracked skill(s)`);
   spinner.start('Checking for updates...');
 
-  const updatable: SkillUpdateInfo[] = [];
-  const upToDate: string[] = [];
-  const uncheckable: Array<{ name: string; reason: string }> = [];
-
-  for (const [name, entry] of skillEntries) {
-    // Only GitHub sources can be checked via Tree SHA
-    if (entry.sourceType !== 'github' || !entry.source) {
-      const reason = entry.sourceType === 'local'
-        ? 'local source'
-        : entry.sourceType === 'collection'
-          ? 'installed from shared collection (reinstall collection to refresh)'
-          : 'source type not auto-checkable';
-      uncheckable.push({ name, reason });
-      continue;
-    }
-
-    // No hash stored — can't compare
-    if (!entry.skillFolderHash) {
-      uncheckable.push({ name, reason: 'no hash recorded (reinstall to fix)' });
-      continue;
-    }
-
-    try {
-      const remoteHash = await fetchSkillFolderHash(entry.source, entry.skillPath || '');
-
-      if (!remoteHash) {
-        uncheckable.push({ name, reason: 'could not fetch remote hash' });
-        continue;
-      }
-
-      if (remoteHash !== entry.skillFolderHash) {
-        updatable.push({
-          name,
-          source: entry.source,
-          sourceUrl: entry.sourceUrl,
-          skillPath: entry.skillPath,
-          localHash: entry.skillFolderHash,
-          remoteHash,
-        });
-      } else {
-        upToDate.push(name);
-      }
-    } catch {
-      uncheckable.push({ name, reason: 'failed to check remote' });
-    }
-  }
+  const checkPayload = await buildCheckPayload(options);
+  const updatable = checkPayload.skills.filter((skill) => skill.status === 'update_available');
+  const upToDate = checkPayload.skills
+    .filter((skill) => skill.status === 'up_to_date')
+    .map((skill) => skill.name);
+  const uncheckable = checkPayload.skills
+    .filter((skill) => skill.status === 'uncheckable')
+    .map((skill) => ({ name: skill.name, reason: skill.reason || 'source type not auto-checkable' }));
 
   spinner.stop('Check complete');
   console.log();
@@ -2766,7 +2993,7 @@ async function runCheck(args: string[]): Promise<void> {
     p.log.warning(pc.yellow(`${updatable.length} skill(s) have updates available:`));
     for (const u of updatable) {
       console.log(`  ${pc.yellow('↑')} ${pc.cyan(u.name)} ${pc.dim(`from ${u.source}`)}`);
-      console.log(`    ${pc.dim(`${u.localHash.slice(0, 8)} → ${u.remoteHash.slice(0, 8)}`)}`);
+      console.log(`    ${pc.dim(formatCheckDelta(u))}`);
     }
     console.log();
     p.log.info(`Run ${pc.cyan('askill update')} to update all`);
@@ -2802,6 +3029,8 @@ interface SkillUpdateResult {
   skillPath: string | null;
   localHash: string | null;
   remoteHash: string | null;
+  localVersion: string | null;
+  remoteVersion: string | null;
   agents: Array<{ id: AgentType; name: string }>;
 }
 
@@ -2827,8 +3056,97 @@ function skippedUpdateResult(check: SkillCheckResult): SkillUpdateResult {
     skillPath: check.skillPath,
     localHash: check.localHash,
     remoteHash: check.remoteHash,
+    localVersion: check.localVersion,
+    remoteVersion: check.remoteVersion,
     agents: [],
   };
+}
+
+async function updateRegistrySkillJson(
+  check: SkillCheckResult,
+  targetAgents: AgentType[],
+  lockEntries: Record<string, SkillLockEntry>,
+  lockOptions: { global: boolean }
+): Promise<SkillUpdateResult> {
+  try {
+    const content = await api.getSkillRaw(registryLookupSlug(check.source));
+    const installMode = await detectRegistryUpdateInstallMode(check.name, targetAgents, lockOptions.global);
+    const installErrors: string[] = [];
+
+    for (const agent of targetAgents) {
+      const result = await installSkill(check.name, content, agent, { mode: installMode, global: lockOptions.global });
+      if (!result.success) {
+        installErrors.push(`${agent}: ${result.error || 'Unknown error'}`);
+      }
+    }
+
+    if (installErrors.length > 0) {
+      throw new Error(installErrors.join('; '));
+    }
+
+    const lockEntry = lockEntries[check.name];
+    await addSkillToLock(check.name, {
+      source: lockEntry.source,
+      sourceType: lockEntry.sourceType,
+      sourceUrl: lockEntry.sourceUrl,
+      skillPath: lockEntry.skillPath,
+      skillFolderHash: lockEntry.skillFolderHash,
+    }, lockOptions);
+
+    return {
+      skill: check.name,
+      status: 'updated',
+      success: true,
+      checkStatus: check.status,
+      reason: null,
+      error: null,
+      source: check.source,
+      sourceUrl: check.sourceUrl,
+      skillPath: check.skillPath,
+      localHash: check.localHash,
+      remoteHash: check.remoteHash,
+      localVersion: check.localVersion,
+      remoteVersion: check.remoteVersion,
+      agents: targetAgents.map(toAgentOutput),
+    };
+  } catch (error) {
+    return {
+      skill: check.name,
+      status: 'failed',
+      success: false,
+      checkStatus: check.status,
+      reason: null,
+      error: error instanceof Error ? error.message : 'Unknown error',
+      source: check.source,
+      sourceUrl: check.sourceUrl,
+      skillPath: check.skillPath,
+      localHash: check.localHash,
+      remoteHash: check.remoteHash,
+      localVersion: check.localVersion,
+      remoteVersion: check.remoteVersion,
+      agents: targetAgents.map(toAgentOutput),
+    };
+  }
+}
+
+async function detectRegistryUpdateInstallMode(
+  skillName: string,
+  targetAgents: AgentType[],
+  globalScope: boolean
+): Promise<InstallMode> {
+  const sanitizedName = sanitizeName(skillName);
+  const canonicalDir = join(getCanonicalSkillsDir(globalScope), sanitizedName);
+  if (await hasSkillMd(canonicalDir)) return 'symlink';
+
+  for (const agentType of targetAgents) {
+    const agent = agents[agentType];
+    if (!agent || (globalScope && !agent.globalSkillsDir)) continue;
+
+    const baseDir = globalScope ? agent.globalSkillsDir! : join(process.cwd(), agent.skillsDir);
+    if (await hasSkillMd(join(baseDir, sanitizedName))) return 'copy';
+  }
+
+  return 'symlink';
 }
 
 async function updateOneSkillJson(
@@ -2837,6 +3155,10 @@ async function updateOneSkillJson(
   lockEntries: Record<string, SkillLockEntry>,
   lockOptions: { global: boolean }
 ): Promise<SkillUpdateResult> {
+  if (check.sourceType === 'registry') {
+    return updateRegistrySkillJson(check, targetAgents, lockEntries, lockOptions);
+  }
+
   let tempDir: string | undefined;
 
   try {
@@ -2891,6 +3213,8 @@ async function updateOneSkillJson(
       skillPath: check.skillPath,
       localHash: check.localHash,
       remoteHash: check.remoteHash,
+      localVersion: check.localVersion,
+      remoteVersion: check.remoteVersion,
       agents: targetAgents.map(toAgentOutput),
     };
   } catch (error) {
@@ -2906,6 +3230,8 @@ async function updateOneSkillJson(
       skillPath: check.skillPath,
       localHash: check.localHash,
       remoteHash: check.remoteHash,
+      localVersion: check.localVersion,
+      remoteVersion: check.remoteVersion,
       agents: targetAgents.map(toAgentOutput),
     };
   } finally {
@@ -3002,30 +3328,8 @@ async function runUpdate(args: string[]): Promise<void> {
     return;
   }
 
-  // Find which skills have updates
-  const updatable: SkillUpdateInfo[] = [];
-
-  for (const [name, entry] of skillEntries) {
-    if (entry.sourceType !== 'github' || !entry.source || !entry.skillFolderHash) {
-      continue;
-    }
-
-    try {
-      const remoteHash = await fetchSkillFolderHash(entry.source, entry.skillPath || '');
-      if (remoteHash && remoteHash !== entry.skillFolderHash) {
-        updatable.push({
-          name,
-          source: entry.source,
-          sourceUrl: entry.sourceUrl,
-          skillPath: entry.skillPath,
-          localHash: entry.skillFolderHash,
-          remoteHash,
-        });
-      }
-    } catch {
-      // Skip skills that can't be checked
-    }
-  }
+  const checkPayload = await buildCheckPayload(scopeOptions);
+  const updatable = checkPayload.skills.filter((skill) => skill.status === 'update_available');
 
   if (updatable.length === 0) {
     spinner.stop('All skills up to date');
@@ -3037,7 +3341,7 @@ async function runUpdate(args: string[]): Promise<void> {
 
   // Show what will be updated
   for (const u of updatable) {
-    console.log(`  ${pc.yellow('↑')} ${pc.cyan(u.name)} ${pc.dim(`(${u.localHash.slice(0, 8)} → ${u.remoteHash.slice(0, 8)})`)}`);
+    console.log(`  ${pc.yellow('↑')} ${pc.cyan(u.name)} ${pc.dim(`(${formatCheckDelta(u)})`)}`);
   }
 
   // Confirm
@@ -3072,7 +3376,7 @@ async function runUpdate(args: string[]): Promise<void> {
     return;
   }
 
-  // Update each skill: clone → discover → install
+  // Update each skill using the same checker/updater paths as JSON mode.
   spinner.start('Updating...');
 
   let successCount = 0;
@@ -3081,58 +3385,14 @@ async function runUpdate(args: string[]): Promise<void> {
   for (const u of updatable) {
     spinner.message(`Updating ${u.name}...`);
 
-    let tempDir: string | undefined;
-    try {
-      // Clone the source repo
-      tempDir = await cloneRepo(u.sourceUrl, undefined, u.skillPath);
-
-      // Discover the specific skill
-      let discovered = await discoverSkills(tempDir, u.skillPath);
-      discovered = discovered.filter((s) => s.name === u.name);
-
-      if (discovered.length === 0) {
-        // Skill might have been renamed or moved; try all
-        discovered = await discoverSkills(tempDir);
-        discovered = discovered.filter((s) => s.name === u.name);
-      }
-
-      if (discovered.length === 0) {
-        p.log.warning(`Skill "${u.name}" not found in source, skipping`);
-        failCount++;
-        continue;
-      }
-
-      const skill = discovered[0];
-
-      // Install to all target agents
-      for (const agent of targetAgents) {
-        if (skill.path) {
-          await installSkillFromDir(skill.name, skill.path, agent, { mode: 'symlink', global: scopeOptions.global });
-        } else {
-          await installSkill(skill.name, skill.rawContent, agent, { mode: 'symlink', global: scopeOptions.global });
-        }
-      }
-
-      // Update lock entry with new hash
-      const lockEntry = skills[u.name];
-      await addSkillToLock(u.name, {
-        source: lockEntry.source,
-        sourceType: lockEntry.sourceType,
-        sourceUrl: lockEntry.sourceUrl,
-        skillPath: lockEntry.skillPath,
-        skillFolderHash: u.remoteHash,
-      }, lockOptions);
-
+    const result = await updateOneSkillJson(u, targetAgents, skills, lockOptions);
+    if (result.success) {
       successCount++;
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : 'Unknown error';
-      p.log.error(`Failed to update ${u.name}: ${pc.dim(msg)}`);
-      failCount++;
-    } finally {
-      if (tempDir) {
-        await cleanupTempDir(tempDir).catch(() => {});
-      }
+      continue;
     }
+
+    p.log.error(`Failed to update ${u.name}: ${pc.dim(result.error || 'Unknown error')}`);
+    failCount++;
   }
 
   spinner.stop('Update complete');

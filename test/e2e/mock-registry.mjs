@@ -1,4 +1,5 @@
 import { createServer } from 'node:http';
+import { readFileSync } from 'node:fs';
 
 const port = Number(process.env.MOCK_REGISTRY_PORT || 4010);
 
@@ -47,6 +48,72 @@ version: 1.0.0
 # Beta Collection Skill
 `,
   },
+  '@mock/alpha-major': {
+    meta: {
+      id: 104,
+      name: 'alpha-collection-skill',
+      description: 'Alpha skill next major release',
+      tags: ['collection', 'alpha'],
+      stars: 7,
+      owner: 'mock',
+      repo: 'skills',
+      path: 'alpha',
+      updatedAt: '2026-03-09T00:00:00.000Z',
+      createdAt: '2026-03-01T00:00:00.000Z',
+    },
+    raw: `---
+name: alpha-collection-skill
+description: Alpha skill next major release
+version: 2.0.0
+---
+
+# Alpha Collection Skill 2
+`,
+  },
+  '@mock/alpha@^1.0.0': {
+    meta: {
+      id: 106,
+      name: 'alpha-collection-skill',
+      description: 'Alpha skill latest 1.x release',
+      tags: ['collection', 'alpha'],
+      stars: 8,
+      owner: 'mock',
+      repo: 'skills',
+      path: 'alpha',
+      updatedAt: '2026-03-09T12:00:00.000Z',
+      createdAt: '2026-03-01T00:00:00.000Z',
+    },
+    raw: `---
+name: alpha-collection-skill
+description: Alpha skill latest 1.x release
+version: 1.1.0
+---
+
+# Alpha Collection Skill 1.1
+`,
+  },
+  '@mock/renamed': {
+    meta: {
+      id: 105,
+      name: 'alpha-collection-skill',
+      description: 'Alpha skill with renamed remote frontmatter',
+      tags: ['collection', 'alpha'],
+      stars: 9,
+      owner: 'mock',
+      repo: 'skills',
+      path: 'alpha',
+      updatedAt: '2026-03-10T00:00:00.000Z',
+      createdAt: '2026-03-01T00:00:00.000Z',
+    },
+    raw: `---
+name: renamed-remote-skill
+description: Alpha skill with renamed remote frontmatter
+version: 1.1.0
+---
+
+# Renamed Remote Skill
+`,
+  },
 };
 
 const skillCatalog = Object.values(skills).map((skill) => skill.meta);
@@ -62,6 +129,30 @@ function parsePositiveInt(value, fallback) {
 function json(res, status, body) {
   res.writeHead(status, { 'content-type': 'application/json' });
   res.end(JSON.stringify(body));
+}
+
+function normalizeSkillSlug(slug) {
+  if (skills[slug]) return slug;
+  const match = slug.match(/^(@[^/]+\/[^@/]+)(?:@[^/]+)?$/);
+  return match ? match[1] : slug;
+}
+
+function skillVersionOverridePath(slug) {
+  const key = slug.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase();
+  return `/tmp/askill-mock-${key}-version`;
+}
+
+function rawForSkill(slug, raw) {
+  try {
+    const version = readFileSync(skillVersionOverridePath(slug), 'utf8').trim();
+    if (version) {
+      return raw.replace(/^version:\s*.+$/m, `version: ${version}`);
+    }
+  } catch {
+    // No override for this test.
+  }
+
+  return raw;
 }
 
 const server = createServer((req, res) => {
@@ -86,7 +177,7 @@ const server = createServer((req, res) => {
       skills: [
         { id: 101, skillName: 'alpha-collection-skill', description: 'Alpha skill from shared collection', repoOwner: 'mock', repoName: 'skills', filePath: 'alpha/SKILL.md', tags: ['collection', 'alpha'], installRef: '@mock/alpha' },
         { id: 102, skillName: 'beta-collection-skill', description: 'Beta skill from shared collection', repoOwner: 'mock', repoName: 'skills', filePath: 'beta/SKILL.md', tags: ['collection', 'beta'], installRef: '@mock/beta' },
-        { id: 103, skillName: 'broken-entry', description: 'This entry intentionally fails to resolve', repoOwner: 'mock', repoName: 'skills', filePath: 'broken/SKILL.md', tags: ['collection'], installRef: '@mock/missing' },
+        { id: 103, skillName: null, description: 'This entry intentionally fails to resolve', repoOwner: 'mock', repoName: 'skills', filePath: 'broken/SKILL.md', tags: ['collection'], installRef: '@mock/missing' },
       ],
     });
     return;
@@ -137,7 +228,7 @@ const server = createServer((req, res) => {
 
   const skillMatch = path.match(/^\/api\/v1\/skills\/(.+)$/);
   if (skillMatch && !path.endsWith('/raw')) {
-    const slug = decodeURIComponent(skillMatch[1]);
+    const slug = normalizeSkillSlug(decodeURIComponent(skillMatch[1]));
     const skill = skills[slug];
     if (!skill) {
       json(res, 404, { error: { code: 'NOT_FOUND', message: 'Skill not found' } });
@@ -149,14 +240,14 @@ const server = createServer((req, res) => {
 
   const rawMatch = path.match(/^\/api\/v1\/skills\/(.+)\/raw$/);
   if (rawMatch) {
-    const slug = decodeURIComponent(rawMatch[1]);
+    const slug = normalizeSkillSlug(decodeURIComponent(rawMatch[1]));
     const skill = skills[slug];
     if (!skill) {
       json(res, 404, { error: { code: 'NOT_FOUND', message: 'Skill not found' } });
       return;
     }
     res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
-    res.end(skill.raw);
+    res.end(rawForSkill(slug, skill.raw));
     return;
   }
 
