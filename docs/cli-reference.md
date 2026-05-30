@@ -258,7 +258,7 @@ extract-errors
 
 ## askill update
 
-Update installed skills to their latest versions.
+Update installed skills to their latest versions. By default this reads the current project's `.agents/.skill-lock.json`; use `--global` for `~/.agents/.skill-lock.json`.
 
 ### Usage
 
@@ -276,7 +276,8 @@ askill update [skill] [options]
 
 | Option | Description |
 |--------|-------------|
-| `-g, --global` | Update global skills |
+| `-g, --global` | Update global skills from the global lock file |
+| `-y, --yes` | Skip confirmation prompts |
 
 ### Examples
 
@@ -295,19 +296,19 @@ askill update -g
 
 ## askill check
 
-Check installed skills for available updates.
+Check installed skills for available updates. By default this reads the current project's `.agents/.skill-lock.json`; use `--global` for `~/.agents/.skill-lock.json`.
 
 ### Usage
 
 ```bash
-askill check [options]
+askill check [skill] [options]
 ```
 
 ### Options
 
 | Option | Description |
 |--------|-------------|
-| `-g, --global` | Check global skills |
+| `-g, --global` | Check global skills from the global lock file |
 
 ### Examples
 
@@ -659,6 +660,8 @@ Skills are installed to agent-specific directories:
 | Canonical | `~/.agents/skills/<skill-name>/` |
 
 By default, skills are written to the canonical location (`.agents/skills/`) and symlinked to each agent's directory for deduplication.
+
+Lock files follow the same scope: project installs write `.agents/.skill-lock.json`, while global installs write `~/.agents/.skill-lock.json`.
 
 ---
 

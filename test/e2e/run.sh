@@ -23,6 +23,8 @@ ERRORS=()
 # ── CLI path ────────────────────────────────────────
 CLI="node /app/dist/cli.mjs"
 WORKSPACE="/workspace"
+PROJECT_LOCK="$WORKSPACE/.agents/.skill-lock.json"
+GLOBAL_LOCK="/root/.agents/.skill-lock.json"
 MOCK_REGISTRY_PORT="4010"
 MOCK_REGISTRY_PID=""
 
@@ -502,6 +504,18 @@ test_install_global() {
     info "Contents of ~/.claude/:"
     ls -la /root/.claude/ 2>/dev/null | sed 's/^/    /' || true
   fi
+
+  if [ -f "$GLOBAL_LOCK" ]; then
+    pass "global install writes global lock file"
+  else
+    fail "global install did not write global lock file"
+  fi
+
+  if [ ! -f "$PROJECT_LOCK" ]; then
+    pass "global install does not write project lock file"
+  else
+    fail "global install unexpectedly wrote project lock file"
+  fi
 }
 
 # ════════════════════════════════════════════════════
@@ -566,20 +580,20 @@ test_config_persistence() {
   clean_workspace
 
   # Remove any existing files
-  rm -f /root/.agents/.skill-lock.json
+  rm -f "$PROJECT_LOCK" "$GLOBAL_LOCK"
   rm -f /root/.config/askill/config.json
 
   # First install - should save preferred agents to lock file
   cd "$WORKSPACE" && $CLI add /app/skills/discover-a-skill -a claude-code -y >/dev/null 2>&1 || true
 
-  # Check lock file (new location for lastSelectedAgents)
-  if [ -f "/root/.agents/.skill-lock.json" ]; then
+  # Check project lock file (default project install scope)
+  if [ -f "$PROJECT_LOCK" ]; then
     pass "lock file created"
     local content
-    content=$(cat /root/.agents/.skill-lock.json)
+    content=$(cat "$PROJECT_LOCK")
     assert_contains "$content" "claude-code" "preferred agents saved in lock file"
   else
-    fail "lock file not created at ~/.agents/.skill-lock.json"
+    fail "lock file not created at project .agents/.skill-lock.json"
   fi
 }
 
@@ -696,9 +710,9 @@ test_install_collection_source() {
     fail "collection skills not installed into expected directories"
   fi
 
-  if [ -f "/root/.agents/.skill-lock.json" ]; then
+  if [ -f "$PROJECT_LOCK" ]; then
     local lock
-    lock=$(cat /root/.agents/.skill-lock.json)
+    lock=$(cat "$PROJECT_LOCK")
     assert_contains "$lock" '"@mock/alpha"' "lock records per-skill registry source"
     assert_contains "$lock" '"@mock/beta"' "lock records second per-skill registry source"
   else
@@ -738,6 +752,11 @@ test_install_collection_production() {
     ASKILL_API_BASE_URL="https://askill.sh/api/v1" \
     timeout 120 $CLI add col:cyhhao/test -a claude-code -y 2>&1) || true
 
+  if echo "$output" | strip_ansi | grep -qi "Collection not found"; then
+    skip "production collection fixture is unavailable"
+    return
+  fi
+
   # Verify the CLI processed the collection (check for skill names or install messages)
   # The collection "test" has skills like flowio, beautiful-mermaid, whisper, discover-a-skill
   if echo "$output" | strip_ansi | grep -qiE "Installing|skill\(s\) in collection|Installed"; then
@@ -762,7 +781,7 @@ test_install_collection_production() {
   fi
 
   # Verify lock file was created with real sources
-  if [ -f "/root/.agents/.skill-lock.json" ]; then
+  if [ -f "$PROJECT_LOCK" ]; then
     pass "lock file created after production collection install"
   else
     fail "lock file missing after production collection install"
@@ -997,16 +1016,16 @@ test_lock_file_install() {
   clean_workspace
 
   # Remove any existing lock file
-  rm -f /root/.agents/.skill-lock.json
+  rm -f "$PROJECT_LOCK" "$GLOBAL_LOCK"
 
   # Install a skill
   cd "$WORKSPACE" && $CLI add /app/skills/discover-a-skill -a claude-code -y >/dev/null 2>&1 || true
 
-  if [ -f "/root/.agents/.skill-lock.json" ]; then
-    pass "lock file created at ~/.agents/.skill-lock.json"
+  if [ -f "$PROJECT_LOCK" ]; then
+    pass "lock file created at project .agents/.skill-lock.json"
 
     local content
-    content=$(cat /root/.agents/.skill-lock.json)
+    content=$(cat "$PROJECT_LOCK")
 
     # Check structure
     assert_contains "$content" '"version"' "has version field"
@@ -1031,28 +1050,28 @@ test_lock_file_remove() {
   clean_workspace
 
   # Remove any existing lock file
-  rm -f /root/.agents/.skill-lock.json
+  rm -f "$PROJECT_LOCK" "$GLOBAL_LOCK"
 
   # Install
   cd "$WORKSPACE" && $CLI add /app/skills/discover-a-skill -a claude-code -y >/dev/null 2>&1 || true
 
   # Verify it's in lock
-  if [ ! -f "/root/.agents/.skill-lock.json" ]; then
+  if [ ! -f "$PROJECT_LOCK" ]; then
     fail "lock file not created, cannot test removal"
     return
   fi
 
   local before
-  before=$(cat /root/.agents/.skill-lock.json)
+  before=$(cat "$PROJECT_LOCK")
   assert_contains "$before" '"discover-a-skill"' "skill in lock before removal"
 
   # Remove (non-interactive JSON mode)
   cd "$WORKSPACE" && $CLI remove discover-a-skill --json >/dev/null 2>&1 || true
 
   # Verify skill is removed from lock but file still exists
-  if [ -f "/root/.agents/.skill-lock.json" ]; then
+  if [ -f "$PROJECT_LOCK" ]; then
     local after
-    after=$(cat /root/.agents/.skill-lock.json)
+    after=$(cat "$PROJECT_LOCK")
     if echo "$after" | grep -q '"discover-a-skill"'; then
       fail "skill still in lock file after removal"
     else
@@ -1071,19 +1090,111 @@ test_lock_file_version() {
   clean_workspace
 
   # Remove any existing lock file
-  rm -f /root/.agents/.skill-lock.json
+  rm -f "$PROJECT_LOCK" "$GLOBAL_LOCK"
 
   # Install to create lock
   cd "$WORKSPACE" && $CLI add /app/skills/discover-a-skill -a claude-code -y >/dev/null 2>&1 || true
 
-  if [ -f "/root/.agents/.skill-lock.json" ]; then
+  if [ -f "$PROJECT_LOCK" ]; then
     local content
-    content=$(cat /root/.agents/.skill-lock.json)
+    content=$(cat "$PROJECT_LOCK")
     # Should be version 3 (Vercel Skills compatible)
     assert_contains "$content" '"version": 3' "version is 3 (Vercel compatible)"
   else
     fail "lock file not created"
   fi
+}
+
+# ════════════════════════════════════════════════════
+# Test: Project/global lock scope isolation
+# ════════════════════════════════════════════════════
+test_lock_file_scope_isolation() {
+  header "Lock file - project/global scope isolation"
+  clean_workspace
+
+  cd "$WORKSPACE" && $CLI add /app/skills/discover-a-skill -a claude-code -g -y >/dev/null 2>&1 || true
+
+  if [ -f "$GLOBAL_LOCK" ]; then
+    pass "global install creates global lock"
+  else
+    fail "global lock missing after global install"
+    return
+  fi
+
+  if [ ! -f "$PROJECT_LOCK" ]; then
+    pass "project lock remains absent after global install"
+  else
+    fail "project lock should not be created by global install"
+  fi
+
+  local project_output
+  project_output=$(cd "$WORKSPACE" && $CLI check 2>&1) || true
+  assert_contains "$project_output" "project lock file" "default check reads project lock"
+
+  local global_output
+  global_output=$(cd "$WORKSPACE" && $CLI check -g 2>&1) || true
+  assert_contains "$global_output" "1 tracked" "check -g reads global lock"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Legacy global lock migration for project installs
+# ════════════════════════════════════════════════════
+test_lock_file_legacy_migration() {
+  header "Lock file - legacy global migration"
+  clean_workspace
+
+  mkdir -p "$(dirname "$GLOBAL_LOCK")" "$WORKSPACE/.agents/skills/legacy-project-skill"
+  cat > "$WORKSPACE/.agents/skills/legacy-project-skill/SKILL.md" <<'SKILL'
+---
+name: legacy-project-skill
+description: Legacy project skill
+version: 1.0.0
+---
+
+# Legacy Project Skill
+SKILL
+
+  cat > "$GLOBAL_LOCK" <<'JSON'
+{
+  "version": 3,
+  "lastSelectedAgents": ["claude-code"],
+  "skills": {
+    "legacy-project-skill": {
+      "source": "/legacy/project",
+      "sourceType": "local",
+      "sourceUrl": "/legacy/project",
+      "skillFolderHash": "",
+      "installedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "other-project-skill": {
+      "source": "/legacy/other",
+      "sourceType": "local",
+      "sourceUrl": "/legacy/other",
+      "skillFolderHash": "",
+      "installedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    }
+  }
+}
+JSON
+
+  local output
+  output=$(cd "$WORKSPACE" && $CLI check 2>&1) || true
+  assert_contains "$output" "1 tracked" "default check migrates matching project entry"
+
+  if [ -f "$PROJECT_LOCK" ]; then
+    pass "project lock created by legacy migration"
+  else
+    fail "project lock missing after legacy migration"
+    return
+  fi
+
+  local migrated
+  migrated=$(cat "$PROJECT_LOCK")
+  assert_contains "$migrated" '"legacy-project-skill"' "project lock contains matching legacy skill"
+  assert_not_contains "$migrated" '"other-project-skill"' "project lock excludes unrelated legacy skill"
+  assert_contains "$migrated" '"claude-code"' "project lock preserves selected agents"
 }
 
 
@@ -1095,7 +1206,7 @@ test_check_empty() {
   clean_workspace
 
   # Remove any existing lock file
-  rm -f /root/.agents/.skill-lock.json
+  rm -f "$PROJECT_LOCK" "$GLOBAL_LOCK"
 
   local output
   output=$(cd "$WORKSPACE" && $CLI check 2>&1) || true
@@ -1111,7 +1222,7 @@ test_check_local_source() {
   clean_workspace
 
   # Remove any existing lock file
-  rm -f /root/.agents/.skill-lock.json
+  rm -f "$PROJECT_LOCK" "$GLOBAL_LOCK"
 
   # Install from local path (creates a lock entry with sourceType=local)
   cd "$WORKSPACE" && $CLI add /app/skills/discover-a-skill -a claude-code -y >/dev/null 2>&1 || true
@@ -1142,6 +1253,14 @@ test_help_includes_check() {
   assert_contains "$output" "check" "help shows check command"
   assert_contains "$output" "update" "help shows update command"
   assert_contains "$output" "upgrade" "help shows upgrade command"
+
+  local check_help
+  check_help=$($CLI check --help 2>&1) || true
+  assert_contains "$check_help" "--global" "check help shows global option"
+
+  local update_help
+  update_help=$($CLI update --help 2>&1) || true
+  assert_contains "$update_help" "--global" "update help shows global option"
 }
 
 # ════════════════════════════════════════════════════
@@ -1152,7 +1271,7 @@ test_update_noop() {
   clean_workspace
 
   # Remove any existing lock file
-  rm -f /root/.agents/.skill-lock.json
+  rm -f "$PROJECT_LOCK" "$GLOBAL_LOCK"
 
   # Install from local (can't check for updates)
   cd "$WORKSPACE" && $CLI add /app/skills/discover-a-skill -a claude-code -y >/dev/null 2>&1 || true
@@ -1177,7 +1296,7 @@ test_update_empty() {
   clean_workspace
 
   # Remove any existing lock file
-  rm -f /root/.agents/.skill-lock.json
+  rm -f "$PROJECT_LOCK" "$GLOBAL_LOCK"
 
   local output
   output=$(cd "$WORKSPACE" && $CLI update -y 2>&1) || true
@@ -1193,21 +1312,21 @@ test_check_after_git_install() {
   clean_workspace
 
   # Remove any existing lock file
-  rm -f /root/.agents/.skill-lock.json
+  rm -f "$PROJECT_LOCK" "$GLOBAL_LOCK"
 
   # Install from GitHub - use a known small repo
   local output
   output=$(cd "$WORKSPACE" && timeout 30 $CLI add avibe-bot/askill@discover-a-skill -a claude-code -y 2>&1) || true
 
   # Determine success by lock file existence (output may include clone fallback warnings)
-  if [ ! -f "/root/.agents/.skill-lock.json" ]; then
+  if [ ! -f "$PROJECT_LOCK" ]; then
     fail "git install did not create lock file"
     echo "$output" | strip_ansi | head -15 | sed 's/^/    /'
     return
   fi
 
   local lock
-  lock=$(cat /root/.agents/.skill-lock.json)
+  lock=$(cat "$PROJECT_LOCK")
   assert_contains "$lock" "avibe-bot/askill" "lock file records GitHub source"
 
   # Now run check - should report up to date (just installed)
@@ -2515,6 +2634,8 @@ ALL_TESTS=(
   test_lock_file_install
   test_lock_file_remove
   test_lock_file_version
+  test_lock_file_scope_isolation
+  test_lock_file_legacy_migration
   test_help_includes_check
   test_check_empty
   test_check_local_source
