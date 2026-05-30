@@ -67,7 +67,7 @@ askill run skill-name:command
 - Use `-y` to skip confirmation prompts
 - Use `-a <agent>` to target a specific agent (claude-code, cursor, opencode, ...)
 - Skills are installed to `.agents/skills/` and symlinked into agent directories
-- Installed metadata is saved in `~/.agents/.skill-lock.json`
+- Installed metadata is saved in `.agents/.skill-lock.json` by default; global installs use `~/.agents/.skill-lock.json`
 
 **For Skill Development:**
 - Read [`docs/skill-spec.md`](./docs/skill-spec.md) for SKILL.md format

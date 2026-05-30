@@ -97,7 +97,8 @@ askill installs to canonical directories and links into agent-specific paths.
 
 State and metadata:
 
-- Lock file: `~/.agents/.skill-lock.json`
+- Project lock file: `.agents/.skill-lock.json`
+- Global lock file: `~/.agents/.skill-lock.json`
 - Credentials: `~/.askill/credentials.json`
 - Preferences: `~/.config/askill/config.json`
 

@@ -261,9 +261,9 @@ function showCommandHelp(commandInput: string): boolean {
 
     info: `${BOLD}askill info${RESET}\n\nUsage:\n  askill info <slug>\n\nDescription:\n  Show detailed metadata and installation info for one skill.\n\nExamples:\n  askill info @johndoe/awesome-tool\n  askill info gh:facebook/react@extract-errors`,
 
-    check: `${BOLD}askill check${RESET}\n\nUsage:\n  askill check [skill]\n\nDescription:\n  Check installed skills for available updates without installing.\n\nExamples:\n  askill check\n  askill check memory`,
+    check: `${BOLD}askill check${RESET}\n\nUsage:\n  askill check [skill] [options]\n\nDescription:\n  Check installed skills for available updates without installing. Defaults to the current project's lock file.\n\nOptions:\n  -g, --global            Check global lock file\n\nExamples:\n  askill check\n  askill check memory\n  askill check -g`,
 
-    update: `${BOLD}askill update${RESET}\n\nUsage:\n  askill update [skill]\n\nDescription:\n  Update one installed skill or all installed skills.\n\nExamples:\n  askill update\n  askill update memory`,
+    update: `${BOLD}askill update${RESET}\n\nUsage:\n  askill update [skill] [options]\n\nDescription:\n  Update one installed skill or all installed skills. Defaults to the current project's lock file.\n\nOptions:\n  -g, --global            Update global lock file and global installs\n  -y, --yes               Skip confirmation prompts\n\nExamples:\n  askill update\n  askill update memory\n  askill update -g -y`,
 
     run: `${BOLD}askill run${RESET}\n\nUsage:\n  askill run <skill>:<command> [args...]\n\nDescription:\n  Run a command declared in a skill's SKILL.md frontmatter.\n\nExamples:\n  askill run @anthropic/memory:save --key name --value \"Alice\"\n  askill run my-skill:_setup`,
 
@@ -727,6 +727,10 @@ async function runInstallJson(skillName: string, options: InstallOptions): Promi
       return;
     }
 
+    const installGlobally = options.global ?? false;
+    const lockOptions = { global: installGlobally };
+    const installMode: InstallMode = options.copy ? 'copy' : 'symlink';
+
     const { targetAgents: specifiedAgents, invalidAgents } = resolveValidatedAgents(options.agent);
     if (invalidAgents.length > 0) {
       printJson({
@@ -748,7 +752,7 @@ async function runInstallJson(skillName: string, options: InstallOptions): Promi
       targetAgents = specifiedAgents;
     } else {
       const installedAgents = await detectInstalledAgents();
-      const preferredAgents = (await getLastSelectedAgents()) || (await getPreferredAgents());
+      const preferredAgents = (await getLastSelectedAgents(lockOptions)) || (await getPreferredAgents());
 
       if (installedAgents.length === 0) {
         targetAgents = validAgents.slice(0, 5) as AgentType[];
@@ -777,9 +781,6 @@ async function runInstallJson(skillName: string, options: InstallOptions): Promi
       process.exitCode = 1;
       return;
     }
-
-    const installGlobally = options.global ?? false;
-    const installMode: InstallMode = options.copy ? 'copy' : 'symlink';
 
     const allResults: Array<{ skill: string; agent: AgentType; success: boolean; error?: string; isDependency?: boolean }> = [];
     const installedNames = new Set<string>();
@@ -888,7 +889,7 @@ async function runInstallJson(skillName: string, options: InstallOptions): Promi
     const failed = allResults.filter((result) => !result.success);
 
     if (successful.length > 0) {
-      await saveLastSelectedAgents(targetAgents);
+      await saveLastSelectedAgents(targetAgents, lockOptions);
 
       const installedSkillNames = new Set(successful.map((result) => result.skill));
       for (const installedSkillName of installedSkillNames) {
@@ -929,7 +930,7 @@ async function runInstallJson(skillName: string, options: InstallOptions): Promi
           sourceUrl,
           skillPath: skillPath || undefined,
           skillFolderHash,
-        }).catch(() => {
+        }, lockOptions).catch(() => {
           // Non-critical
         });
       }
@@ -1088,6 +1089,28 @@ async function runInstall(args: string[]): Promise<void> {
     skillsToInstall = selected as DiscoveredSkill[];
   }
 
+  // Select scope before agent detection so project/global installs use the matching lock.
+  let installGlobally = options.global ?? false;
+
+  if (options.global === undefined && !options.yes) {
+    const scope = await p.select({
+      message: 'Installation scope',
+      options: [
+        { value: false, label: 'Project', hint: 'Install in current directory' },
+        { value: true, label: 'Global', hint: 'Install in home directory (all projects)' },
+      ],
+    });
+
+    if (p.isCancel(scope)) {
+      p.cancel('Installation cancelled');
+      return;
+    }
+
+    installGlobally = scope as boolean;
+  }
+
+  const lockOptions = { global: installGlobally };
+
   // Detect agents
   let targetAgents: AgentType[];
   const validAgents = Object.keys(agents) as AgentType[];
@@ -1110,7 +1133,7 @@ async function runInstall(args: string[]): Promise<void> {
       installedAgents = await detectInstalledAgents();
       p.log.info(`Found ${installedAgents.length} agent(s)`);
     }
-    const preferredAgents = (await getLastSelectedAgents()) || (await getPreferredAgents());
+    const preferredAgents = (await getLastSelectedAgents(lockOptions)) || (await getPreferredAgents());
 
     if (installedAgents.length === 0) {
       if (options.yes) {
@@ -1170,26 +1193,6 @@ async function runInstall(args: string[]): Promise<void> {
 
       targetAgents = selected as AgentType[];
     }
-  }
-
-  // Select scope (global vs project)
-  let installGlobally = options.global ?? false;
-
-  if (options.global === undefined && !options.yes) {
-    const scope = await p.select({
-      message: 'Installation scope',
-      options: [
-        { value: false, label: 'Project', hint: 'Install in current directory' },
-        { value: true, label: 'Global', hint: 'Install in home directory (all projects)' },
-      ],
-    });
-
-    if (p.isCancel(scope)) {
-      p.cancel('Installation cancelled');
-      return;
-    }
-
-    installGlobally = scope as boolean;
   }
 
   const installMode: InstallMode = options.copy ? 'copy' : 'symlink';
@@ -1340,7 +1343,7 @@ async function runInstall(args: string[]): Promise<void> {
 
   if (successful.length > 0) {
     // Save selected agents as preferred for next time
-    await saveLastSelectedAgents(targetAgents);
+    await saveLastSelectedAgents(targetAgents, lockOptions);
 
     // Write lock entries for all successfully installed skills
     const installedSkillNames = new Set(successful.map((r) => r.skill));
@@ -1389,7 +1392,7 @@ async function runInstall(args: string[]): Promise<void> {
         sourceUrl,
         skillPath: skillPath || undefined,
         skillFolderHash,
-      }).catch(() => {
+      }, lockOptions).catch(() => {
         // Non-critical: lock file write failure shouldn't fail install
       });
     }
@@ -2020,7 +2023,7 @@ async function runRemove(args: string[]): Promise<void> {
       const orphanRemoval = await removeCanonicalSkill(resolvedSkillName, { global: effectiveGlobalScope });
 
       if (orphanRemoval.success) {
-        await removeSkillFromLock(resolvedSkillName).catch(() => {
+        await removeSkillFromLock(resolvedSkillName, { global: effectiveGlobalScope }).catch(() => {
           // Non-critical: lock cleanup failure shouldn't fail removal
         });
 
@@ -2118,7 +2121,7 @@ async function runRemove(args: string[]): Promise<void> {
 
   // Remove from lock file
   if (removedAgents.length > 0) {
-    await removeSkillFromLock(resolvedSkillName).catch(() => {
+    await removeSkillFromLock(resolvedSkillName, { global: effectiveGlobalScope }).catch(() => {
       // Non-critical: lock file cleanup failure shouldn't fail removal
     });
   }
@@ -2267,32 +2270,60 @@ export interface SkillUpdateInfo {
   remoteHash: string;
 }
 
-async function runCheck(_args: string[]): Promise<void> {
+interface ScopedSkillOptions {
+  global: boolean;
+  skillName?: string;
+}
+
+function parseScopedSkillOptions(args: string[]): ScopedSkillOptions {
+  const options: ScopedSkillOptions = { global: false };
+
+  for (const arg of args) {
+    if (arg === '-g' || arg === '--global') {
+      options.global = true;
+      continue;
+    }
+
+    if (!arg.startsWith('-') && !options.skillName) {
+      options.skillName = arg;
+    }
+  }
+
+  return options;
+}
+
+async function runCheck(args: string[]): Promise<void> {
+  const options = parseScopedSkillOptions(args);
+  const lockOptions = { global: options.global };
+
   console.log();
   p.intro(pc.bgCyan(pc.black(' askill check ')));
 
   const spinner = p.spinner();
   spinner.start('Reading lock file...');
 
-  const skills = await getAllLockedSkills();
-  const skillNames = Object.keys(skills);
+  const skills = await getAllLockedSkills(lockOptions);
+  const skillEntries = Object.entries(skills).filter(([name]) => !options.skillName || name === options.skillName);
 
-  if (skillNames.length === 0) {
+  if (skillEntries.length === 0) {
     spinner.stop('No skills tracked');
-    p.log.info('No installed skills found in lock file');
+    const scope = options.global ? 'global' : 'project';
+    p.log.info(options.skillName
+      ? `Skill "${options.skillName}" not found in ${scope} lock file`
+      : `No installed skills found in ${scope} lock file`);
     p.log.info(`Install skills with ${pc.cyan('askill add <skill>')}`);
     p.outro('');
     return;
   }
 
-  spinner.stop(`Found ${skillNames.length} tracked skill(s)`);
+  spinner.stop(`Found ${skillEntries.length} tracked skill(s)`);
   spinner.start('Checking for updates...');
 
   const updatable: SkillUpdateInfo[] = [];
   const upToDate: string[] = [];
   const uncheckable: Array<{ name: string; reason: string }> = [];
 
-  for (const [name, entry] of Object.entries(skills)) {
+  for (const [name, entry] of skillEntries) {
     // Only GitHub sources can be checked via Tree SHA
     if (entry.sourceType !== 'github' || !entry.source) {
       const reason = entry.sourceType === 'local'
@@ -2368,7 +2399,8 @@ async function runCheck(_args: string[]): Promise<void> {
 
 async function runUpdate(args: string[]): Promise<void> {
   const isYes = args.includes('-y') || args.includes('--yes');
-  const specificSkill = args.find((a) => !a.startsWith('-'));
+  const scopeOptions = parseScopedSkillOptions(args);
+  const lockOptions = { global: scopeOptions.global };
 
   console.log();
   p.intro(pc.bgCyan(pc.black(' askill update ')));
@@ -2376,12 +2408,15 @@ async function runUpdate(args: string[]): Promise<void> {
   const spinner = p.spinner();
   spinner.start('Checking for updates...');
 
-  const skills = await getAllLockedSkills();
-  const skillNames = Object.keys(skills);
+  const skills = await getAllLockedSkills(lockOptions);
+  const skillEntries = Object.entries(skills).filter(([name]) => !scopeOptions.skillName || name === scopeOptions.skillName);
 
-  if (skillNames.length === 0) {
+  if (skillEntries.length === 0) {
     spinner.stop('No skills tracked');
-    p.log.info('No installed skills found in lock file');
+    const scope = scopeOptions.global ? 'global' : 'project';
+    p.log.info(scopeOptions.skillName
+      ? `Skill "${scopeOptions.skillName}" not found in ${scope} lock file`
+      : `No installed skills found in ${scope} lock file`);
     p.outro('');
     return;
   }
@@ -2389,10 +2424,7 @@ async function runUpdate(args: string[]): Promise<void> {
   // Find which skills have updates
   const updatable: SkillUpdateInfo[] = [];
 
-  for (const [name, entry] of Object.entries(skills)) {
-    // If specific skill requested, skip others
-    if (specificSkill && name !== specificSkill) continue;
-
+  for (const [name, entry] of skillEntries) {
     if (entry.sourceType !== 'github' || !entry.source || !entry.skillFolderHash) {
       continue;
     }
@@ -2440,7 +2472,7 @@ async function runUpdate(args: string[]): Promise<void> {
   }
 
   // Get last selected agents
-  const lastAgents = await getLastSelectedAgents();
+  const lastAgents = await getLastSelectedAgents(lockOptions);
   let targetAgents: AgentType[];
 
   if (lastAgents && lastAgents.length > 0) {
@@ -2494,9 +2526,9 @@ async function runUpdate(args: string[]): Promise<void> {
       // Install to all target agents
       for (const agent of targetAgents) {
         if (skill.path) {
-          await installSkillFromDir(skill.name, skill.path, agent, { mode: 'symlink' });
+          await installSkillFromDir(skill.name, skill.path, agent, { mode: 'symlink', global: scopeOptions.global });
         } else {
-          await installSkill(skill.name, skill.rawContent, agent, { mode: 'symlink' });
+          await installSkill(skill.name, skill.rawContent, agent, { mode: 'symlink', global: scopeOptions.global });
         }
       }
 
@@ -2508,7 +2540,7 @@ async function runUpdate(args: string[]): Promise<void> {
         sourceUrl: lockEntry.sourceUrl,
         skillPath: lockEntry.skillPath,
         skillFolderHash: u.remoteHash,
-      });
+      }, lockOptions);
 
       successCount++;
     } catch (error) {

@@ -1,14 +1,24 @@
 // Skill Lock File - tracks installed skills for update detection
 // Compatible with Vercel Skills CLI lock file format
-// Location: ~/.agents/.skill-lock.json
+// Project location: <project>/.agents/.skill-lock.json
+// Global location: ~/.agents/.skill-lock.json
 
-import { readFile, writeFile, mkdir } from 'fs/promises';
+import { access, readFile, writeFile, mkdir } from 'fs/promises';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
+import { sanitizeName } from './installer.ts';
 
 const AGENTS_DIR = '.agents';
+const SKILLS_SUBDIR = 'skills';
 const LOCK_FILE = '.skill-lock.json';
 const CURRENT_VERSION = 3; // Match Vercel Skills version for compatibility
+
+export interface SkillLockOptions {
+  /** Use the user-level lock file instead of the current project lock file. */
+  global?: boolean;
+  /** Project directory for project-scoped lock operations. Defaults to process.cwd(). */
+  cwd?: string;
+}
 
 /**
  * Represents a single installed skill entry in the lock file.
@@ -59,11 +69,11 @@ export interface SkillLockFile {
 }
 
 /**
- * Get the path to the global skill lock file.
- * Located at ~/.agents/.skill-lock.json
+ * Get the path to the scoped skill lock file.
  */
-export function getSkillLockPath(): string {
-  return join(homedir(), AGENTS_DIR, LOCK_FILE);
+export function getSkillLockPath(options: SkillLockOptions = {}): string {
+  const baseDir = options.global ? (process.env.HOME?.trim() || homedir()) : options.cwd || process.cwd();
+  return join(baseDir, AGENTS_DIR, LOCK_FILE);
 }
 
 /**
@@ -81,36 +91,76 @@ function createEmptyLockFile(): SkillLockFile {
  * Returns an empty lock file structure if the file doesn't exist.
  * Preserves unknown fields for compatibility with Vercel Skills.
  */
-export async function readSkillLock(): Promise<SkillLockFile> {
-  const lockPath = getSkillLockPath();
+export async function readSkillLock(options: SkillLockOptions = {}): Promise<SkillLockFile> {
+  const lockPath = getSkillLockPath(options);
+  const result = await readSkillLockFile(lockPath);
 
+  if (result.exists || options.global) {
+    return result.lock;
+  }
+
+  const migrated = await migrateLegacyGlobalLockToProject(options.cwd || process.cwd());
+  if (migrated) {
+    await writeSkillLock(migrated, options);
+    return migrated;
+  }
+
+  return result.lock;
+}
+
+async function readSkillLockFile(lockPath: string): Promise<{ lock: SkillLockFile; exists: boolean }> {
   try {
     const content = await readFile(lockPath, 'utf-8');
     const parsed = JSON.parse(content) as SkillLockFile;
 
     // Validate basic structure
     if (typeof parsed.version !== 'number' || !parsed.skills) {
-      return createEmptyLockFile();
+      return { lock: createEmptyLockFile(), exists: true };
     }
 
     // If old version, wipe and start fresh (backwards incompatible)
     if (parsed.version < CURRENT_VERSION) {
-      return createEmptyLockFile();
+      return { lock: createEmptyLockFile(), exists: true };
     }
 
-    return parsed;
-  } catch {
-    // File doesn't exist or is invalid - return empty
-    return createEmptyLockFile();
+    return { lock: parsed, exists: true };
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return { lock: createEmptyLockFile(), exists: code !== 'ENOENT' };
   }
+}
+
+async function migrateLegacyGlobalLockToProject(cwd: string): Promise<SkillLockFile | null> {
+  const legacy = await readSkillLockFile(getSkillLockPath({ global: true }));
+  if (!legacy.exists) return null;
+
+  const migratedSkills: Record<string, SkillLockEntry> = {};
+
+  for (const [skillName, entry] of Object.entries(legacy.lock.skills)) {
+    const projectSkillPath = join(cwd, AGENTS_DIR, SKILLS_SUBDIR, sanitizeName(skillName), 'SKILL.md');
+    try {
+      await access(projectSkillPath);
+      migratedSkills[skillName] = entry;
+    } catch {
+      // Legacy global locks may include other projects or real global installs.
+    }
+  }
+
+  if (Object.keys(migratedSkills).length === 0) return null;
+
+  return {
+    ...legacy.lock,
+    version: CURRENT_VERSION,
+    skills: migratedSkills,
+  };
 }
 
 /**
  * Write the skill lock file.
  * Creates the directory if it doesn't exist.
  */
-export async function writeSkillLock(lock: SkillLockFile): Promise<void> {
-  const lockPath = getSkillLockPath();
+export async function writeSkillLock(lock: SkillLockFile, options: SkillLockOptions = {}): Promise<void> {
+  const lockPath = getSkillLockPath(options);
 
   // Ensure directory exists
   await mkdir(dirname(lockPath), { recursive: true });
@@ -125,9 +175,10 @@ export async function writeSkillLock(lock: SkillLockFile): Promise<void> {
  */
 export async function addSkillToLock(
   skillName: string,
-  entry: Omit<SkillLockEntry, 'installedAt' | 'updatedAt'>
+  entry: Omit<SkillLockEntry, 'installedAt' | 'updatedAt'>,
+  options: SkillLockOptions = {}
 ): Promise<void> {
-  const lock = await readSkillLock();
+  const lock = await readSkillLock(options);
   const now = new Date().toISOString();
 
   const existingEntry = lock.skills[skillName];
@@ -138,47 +189,47 @@ export async function addSkillToLock(
     updatedAt: now,
   };
 
-  await writeSkillLock(lock);
+  await writeSkillLock(lock, options);
 }
 
 /**
  * Remove a skill from the lock file.
  */
-export async function removeSkillFromLock(skillName: string): Promise<boolean> {
-  const lock = await readSkillLock();
+export async function removeSkillFromLock(skillName: string, options: SkillLockOptions = {}): Promise<boolean> {
+  const lock = await readSkillLock(options);
 
   if (!(skillName in lock.skills)) {
     return false;
   }
 
   delete lock.skills[skillName];
-  await writeSkillLock(lock);
+  await writeSkillLock(lock, options);
   return true;
 }
 
 /**
  * Get a skill entry from the lock file.
  */
-export async function getSkillFromLock(skillName: string): Promise<SkillLockEntry | null> {
-  const lock = await readSkillLock();
+export async function getSkillFromLock(skillName: string, options: SkillLockOptions = {}): Promise<SkillLockEntry | null> {
+  const lock = await readSkillLock(options);
   return lock.skills[skillName] ?? null;
 }
 
 /**
  * Get all skills from the lock file.
  */
-export async function getAllLockedSkills(): Promise<Record<string, SkillLockEntry>> {
-  const lock = await readSkillLock();
+export async function getAllLockedSkills(options: SkillLockOptions = {}): Promise<Record<string, SkillLockEntry>> {
+  const lock = await readSkillLock(options);
   return lock.skills;
 }
 
 /**
  * Get skills grouped by source for batch update operations.
  */
-export async function getSkillsBySource(): Promise<
+export async function getSkillsBySource(options: SkillLockOptions = {}): Promise<
   Map<string, { skills: string[]; entry: SkillLockEntry }>
 > {
-  const lock = await readSkillLock();
+  const lock = await readSkillLock(options);
   const bySource = new Map<string, { skills: string[]; entry: SkillLockEntry }>();
 
   for (const [skillName, entry] of Object.entries(lock.skills)) {
@@ -196,18 +247,18 @@ export async function getSkillsBySource(): Promise<
 /**
  * Get the last selected agents.
  */
-export async function getLastSelectedAgents(): Promise<string[] | undefined> {
-  const lock = await readSkillLock();
+export async function getLastSelectedAgents(options: SkillLockOptions = {}): Promise<string[] | undefined> {
+  const lock = await readSkillLock(options);
   return lock.lastSelectedAgents;
 }
 
 /**
  * Save the selected agents to the lock file.
  */
-export async function saveLastSelectedAgents(agents: string[]): Promise<void> {
-  const lock = await readSkillLock();
+export async function saveLastSelectedAgents(agents: string[], options: SkillLockOptions = {}): Promise<void> {
+  const lock = await readSkillLock(options);
   lock.lastSelectedAgents = agents;
-  await writeSkillLock(lock);
+  await writeSkillLock(lock, options);
 }
 
 /**
