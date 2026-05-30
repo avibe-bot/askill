@@ -300,7 +300,7 @@
     },
     "CheckSkillItem": {
       "type": "object",
-      "required": ["name", "scope", "status", "source", "sourceType", "sourceUrl", "skillPath", "localHash", "remoteHash", "reason", "installedAt", "updatedAt"],
+      "required": ["name", "scope", "status", "source", "sourceType", "sourceUrl", "skillPath", "localHash", "remoteHash", "localVersion", "remoteVersion", "reason", "installedAt", "updatedAt"],
       "properties": {
         "name": { "type": "string" },
         "scope": { "type": "string", "enum": ["project", "global"] },
@@ -311,6 +311,8 @@
         "skillPath": { "type": ["string", "null"] },
         "localHash": { "type": ["string", "null"] },
         "remoteHash": { "type": ["string", "null"] },
+        "localVersion": { "type": ["string", "null"] },
+        "remoteVersion": { "type": ["string", "null"] },
         "reason": { "type": ["string", "null"] },
         "installedAt": { "type": ["string", "null"] },
         "updatedAt": { "type": ["string", "null"] }
@@ -332,7 +334,7 @@
     },
     "UpdateResultItem": {
       "type": "object",
-      "required": ["skill", "status", "success", "checkStatus", "reason", "error", "source", "sourceUrl", "skillPath", "localHash", "remoteHash", "agents"],
+      "required": ["skill", "status", "success", "checkStatus", "reason", "error", "source", "sourceUrl", "skillPath", "localHash", "remoteHash", "localVersion", "remoteVersion", "agents"],
       "properties": {
         "skill": { "type": "string" },
         "status": { "type": "string", "enum": ["updated", "skipped", "failed"] },
@@ -345,6 +347,8 @@
         "skillPath": { "type": ["string", "null"] },
         "localHash": { "type": ["string", "null"] },
         "remoteHash": { "type": ["string", "null"] },
+        "localVersion": { "type": ["string", "null"] },
+        "remoteVersion": { "type": ["string", "null"] },
         "agents": { "type": "array", "items": { "$ref": "#/$defs/AgentRef" } }
       },
       "additionalProperties": true

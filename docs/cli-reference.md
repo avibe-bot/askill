@@ -61,6 +61,7 @@ askill add <slug> [options]
 | `-a, --agent <agents...>` | Install to specific agents only |
 | `-y, --yes` | Skip confirmation prompts (non-interactive mode) |
 | `--copy` | Copy files instead of symlink |
+| `--skill <name>` | Install one skill from a multi-skill source without prompting |
 | `--json` | Output machine-readable JSON |
 
 ### Examples
@@ -77,6 +78,9 @@ askill add gh:facebook/react/scripts/error-codes
 
 # List skills in a repo and select
 askill add gh:facebook/react
+
+# Install one skill from a local multi-skill directory
+askill add ./skills --skill formatter -a opencode -y --json
 
 # Install globally
 askill add gh:owner/repo@skill -g

@@ -2289,6 +2289,104 @@ test_add_json_requires_selection() {
 }
 
 # ════════════════════════════════════════════════════
+# Test: Add --skill selector for local multi-skill sources
+# ════════════════════════════════════════════════════
+test_add_skill_selector_local() {
+  header "Add --skill selector (local source)"
+  clean_workspace
+
+  local src="/tmp/test-skill-selector"
+  rm -rf "$src"
+  mkdir -p "$src/alpha" "$src/beta"
+
+  cat > "$src/alpha/SKILL.md" <<'SKILL'
+---
+name: selector-alpha
+description: selector alpha skill
+version: 1.0.0
+---
+# Selector Alpha
+SKILL
+
+  cat > "$src/beta/SKILL.md" <<'SKILL'
+---
+name: selector-beta
+description: selector beta skill
+version: 1.0.0
+---
+# Selector Beta
+SKILL
+
+  local output
+  output=$(cd "$WORKSPACE" && $CLI add "$src" --skill selector-beta -a claude-code -y --json 2>&1) || true
+  if echo "$output" | node -e '
+    const fs = require("fs");
+    const data = JSON.parse(fs.readFileSync(0, "utf8"));
+    if (data.ok !== true) process.exit(1);
+    if (!Array.isArray(data.requestedSkills) || data.requestedSkills.length !== 1) process.exit(1);
+    if (data.requestedSkills[0].name !== "selector-beta") process.exit(1);
+    if (!Array.isArray(data.results) || !data.results.every((result) => result.skill === "selector-beta")) process.exit(1);
+  '; then
+    pass "add --skill installs selected local skill"
+  else
+    fail "add --skill local selector payload mismatch"
+    echo "$output" | strip_ansi | head -10 | sed 's/^/    /'
+  fi
+
+  if [ -e "$WORKSPACE/.claude/skills/selector-beta" ] && [ ! -e "$WORKSPACE/.claude/skills/selector-alpha" ]; then
+    pass "add --skill only writes selected skill"
+  else
+    fail "add --skill wrote unexpected local skills"
+  fi
+
+  rm -rf "$src"
+}
+
+# ════════════════════════════════════════════════════
+# Test: Re-link canonical installed skill to another agent
+# ════════════════════════════════════════════════════
+test_add_canonical_path_relinks_agent() {
+  header "Add canonical path re-links agent"
+  clean_workspace
+
+  cd "$WORKSPACE" && $CLI add /app/skills/discover-a-skill -a claude-code -y >/dev/null 2>&1 || true
+
+  local canonical_path="$WORKSPACE/.agents/skills/discover-a-skill"
+  local lock_before
+  lock_before=$(node -e "const fs=require('fs'); const data=JSON.parse(fs.readFileSync(process.argv[1],'utf8')); process.stdout.write(JSON.stringify(data.skills['discover-a-skill']));" "$PROJECT_LOCK")
+
+  local output
+  output=$(cd "$WORKSPACE" && $CLI add "$canonical_path" -a cursor -y --json 2>&1) || true
+  if echo "$output" | node -e '
+    const fs = require("fs");
+    const data = JSON.parse(fs.readFileSync(0, "utf8"));
+    if (data.ok !== true) process.exit(1);
+    if (!Array.isArray(data.results) || data.results.length !== 1) process.exit(1);
+    const result = data.results[0];
+    if (result.skill !== "discover-a-skill" || result.agent.id !== "cursor" || result.success !== true) process.exit(1);
+  '; then
+    pass "canonical path add reports relink success"
+  else
+    fail "canonical path relink payload mismatch"
+    echo "$output" | strip_ansi | head -10 | sed 's/^/    /'
+  fi
+
+  if [ -f "$canonical_path/SKILL.md" ] && [ -e "$WORKSPACE/.claude/skills/discover-a-skill" ] && [ -e "$WORKSPACE/.cursor/skills/discover-a-skill" ]; then
+    pass "canonical path relink preserves source and links new agent"
+  else
+    fail "canonical path relink did not preserve expected paths"
+  fi
+
+  local lock_after
+  lock_after=$(node -e "const fs=require('fs'); const data=JSON.parse(fs.readFileSync(process.argv[1],'utf8')); process.stdout.write(JSON.stringify(data.skills['discover-a-skill']));" "$PROJECT_LOCK")
+  if [ "$lock_before" = "$lock_after" ]; then
+    pass "canonical path relink preserves existing lock metadata"
+  else
+    fail "canonical path relink changed existing lock metadata"
+  fi
+}
+
+# ════════════════════════════════════════════════════
 # Test: List --json invalid agent
 # ════════════════════════════════════════════════════
 test_list_json_invalid_agent() {
@@ -2585,18 +2683,26 @@ test_dashboard_json_contracts() {
     return
   fi
 
+  node -e '
+    const fs = require("fs");
+    const path = process.argv[1];
+    const content = fs.readFileSync(path, "utf8");
+    fs.writeFileSync(path, content.replace("version: 1.0.0", "version: 0.9.0"));
+  ' "$WORKSPACE/.agents/skills/alpha-collection-skill/SKILL.md"
+
   local check_output
   check_output=$(cd "$WORKSPACE" && ASKILL_REGISTRY_URL="$registry_url" ASKILL_API_BASE_URL="$api_url" $CLI check --json 2>&1) || true
   if echo "$check_output" | node -e '
     const fs = require("fs");
     const data = JSON.parse(fs.readFileSync(0, "utf8"));
     if (data.ok !== true || data.scope !== "project") process.exit(1);
-    if (!data.summary || data.summary.total !== 1 || data.summary.uncheckable !== 1) process.exit(1);
+    if (!data.summary || data.summary.total !== 1 || data.summary.updateAvailable !== 1) process.exit(1);
     const target = (data.skills || []).find((skill) => skill.name === "alpha-collection-skill");
-    if (!target || target.status !== "uncheckable") process.exit(1);
+    if (!target || target.status !== "update_available") process.exit(1);
     if (target.sourceType !== "registry") process.exit(1);
+    if (target.localVersion !== "0.9.0" || target.remoteVersion !== "1.0.0") process.exit(1);
   '; then
-    pass "check --json reports structured status"
+    pass "check --json detects registry version updates"
   else
     fail "check --json payload mismatch"
     echo "$check_output" | strip_ansi | head -10 | sed 's/^/    /'
@@ -2610,14 +2716,28 @@ test_dashboard_json_contracts() {
     const fs = require("fs");
     const data = JSON.parse(fs.readFileSync(0, "utf8"));
     if (data.ok !== true || data.action !== "update") process.exit(1);
-    if (!data.summary || data.summary.checked !== 1 || data.summary.skipped !== 1) process.exit(1);
+    if (!data.summary || data.summary.checked !== 1 || data.summary.updated !== 1) process.exit(1);
     const target = (data.results || []).find((result) => result.skill === "alpha-collection-skill");
-    if (!target || target.status !== "skipped" || target.checkStatus !== "uncheckable") process.exit(1);
+    if (!target || target.status !== "updated" || target.checkStatus !== "update_available") process.exit(1);
+    if (target.localVersion !== "0.9.0" || target.remoteVersion !== "1.0.0") process.exit(1);
   '; then
-    pass "update --json reports skipped/no-op results"
+    pass "update --json updates registry-sourced skills"
   else
     fail "update --json payload mismatch"
     echo "$update_output" | strip_ansi | head -10 | sed 's/^/    /'
+  fi
+
+  local updated_version
+  updated_version=$(node -e '
+    const fs = require("fs");
+    const content = fs.readFileSync(process.argv[1], "utf8");
+    const match = content.match(/^version:\s*(.+)$/m);
+    process.stdout.write(match ? match[1].trim() : "");
+  ' "$WORKSPACE/.agents/skills/alpha-collection-skill/SKILL.md")
+  if [ "$updated_version" = "1.0.0" ]; then
+    pass "update --json writes latest registry SKILL.md"
+  else
+    fail "update --json did not refresh registry skill version"
   fi
 
   stop_mock_registry
@@ -2801,6 +2921,8 @@ ALL_TESTS=(
   test_add_json_preview_and_install
   test_add_json_invalid_agent
   test_add_json_requires_selection
+  test_add_skill_selector_local
+  test_add_canonical_path_relinks_agent
   test_find_json_output
   test_dashboard_json_contracts
   test_reinstall_skill
