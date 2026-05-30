@@ -2415,6 +2415,102 @@ SKILL
 }
 
 # ════════════════════════════════════════════════════
+# Test: Add --skill selector misses in collections
+# ════════════════════════════════════════════════════
+test_add_skill_selector_collection_no_match() {
+  header "Add --skill selector no match (collection)"
+  clean_workspace
+
+  start_mock_registry || return
+
+  local registry_url="http://127.0.0.1:${MOCK_REGISTRY_PORT}"
+  local api_url="${registry_url}/api/v1"
+  local output
+  local code=0
+
+  output=$(cd "$WORKSPACE" && ASKILL_REGISTRY_URL="$registry_url" ASKILL_API_BASE_URL="$api_url" $CLI add col:mock/dev-tools--grp123 --skill does-not-exist -a claude-code -y --json 2>&1) || code=$?
+  if [ "$code" -eq 1 ]; then
+    pass "collection --skill no match exits non-zero"
+  else
+    fail "collection --skill no match should fail (exit=$code)"
+  fi
+
+  if echo "$output" | node -e '
+    const fs = require("fs");
+    const data = JSON.parse(fs.readFileSync(0, "utf8"));
+    if (data.ok !== false) process.exit(1);
+    if (!data.error || data.error.code !== "SKILL_NOT_FOUND") process.exit(1);
+    if (!data.error.details || data.error.details.requestedSkill !== "does-not-exist") process.exit(1);
+  '; then
+    pass "collection --skill no match reports selector error"
+  else
+    fail "collection --skill no match payload mismatch"
+    echo "$output" | strip_ansi | head -10 | sed 's/^/    /'
+  fi
+
+  stop_mock_registry
+}
+
+# ════════════════════════════════════════════════════
+# Test: Add --skill selector miss cleans cloned git temp dirs
+# ════════════════════════════════════════════════════
+test_add_skill_selector_git_miss_cleans_temp() {
+  header "Add --skill selector cleans git temp"
+  clean_workspace
+
+  local repo="/tmp/test-skill-selector-git-miss"
+  rm -rf "$repo"
+  mkdir -p "$repo/skills/alpha"
+
+  cat > "$repo/skills/alpha/SKILL.md" <<'SKILL'
+---
+name: selector-git-alpha
+description: selector git alpha skill
+version: 1.0.0
+---
+# Selector Git Alpha
+SKILL
+
+  git -C "$repo" init >/dev/null 2>&1
+  git -C "$repo" add . >/dev/null 2>&1
+  git -C "$repo" -c user.email=e2e@example.com -c user.name=E2E commit -m init >/dev/null 2>&1
+
+  local before_count
+  before_count=$(ls -d /tmp/askill-* 2>/dev/null | wc -l | tr -d ' ')
+
+  local output
+  local code=0
+  output=$(cd "$WORKSPACE" && $CLI add "file://$repo" --skill does-not-exist -a claude-code -y --json 2>&1) || code=$?
+  if [ "$code" -eq 1 ]; then
+    pass "git --skill no match exits non-zero"
+  else
+    fail "git --skill no match should fail (exit=$code)"
+  fi
+
+  if echo "$output" | node -e '
+    const fs = require("fs");
+    const data = JSON.parse(fs.readFileSync(0, "utf8"));
+    if (data.ok !== false) process.exit(1);
+    if (!data.error || data.error.code !== "SKILL_NOT_FOUND") process.exit(1);
+  '; then
+    pass "git --skill no match reports selector error"
+  else
+    fail "git --skill no match payload mismatch"
+    echo "$output" | strip_ansi | head -10 | sed 's/^/    /'
+  fi
+
+  local after_count
+  after_count=$(ls -d /tmp/askill-* 2>/dev/null | wc -l | tr -d ' ')
+  if [ "$after_count" = "$before_count" ]; then
+    pass "git --skill no match cleans cloned temp dir"
+  else
+    fail "git --skill no match leaked temp dir (before=$before_count after=$after_count)"
+  fi
+
+  rm -rf "$repo"
+}
+
+# ════════════════════════════════════════════════════
 # Test: Add --skill selector for registry refs inside collections
 # ════════════════════════════════════════════════════
 test_add_skill_selector_collection_registry_refs() {
@@ -2619,14 +2715,20 @@ test_registry_copy_mode_check_update() {
     fail "copy-mode registry update did not refresh version"
   fi
 
+  if [ ! -e "$WORKSPACE/.agents/skills/alpha-collection-skill" ] && [ ! -L "$WORKSPACE/.claude/skills/alpha-collection-skill" ]; then
+    pass "copy-mode registry update preserves copy layout"
+  else
+    fail "copy-mode registry update converted install to symlink layout"
+  fi
+
   stop_mock_registry
 }
 
 # ════════════════════════════════════════════════════
-# Test: Registry version pins block out-of-range latest
+# Test: Registry version pins use range-aware candidates
 # ════════════════════════════════════════════════════
-test_registry_version_pin_blocks_major_update() {
-  header "Registry version pin blocks major update"
+test_registry_version_pin_uses_range_update() {
+  header "Registry version pin uses range update"
   clean_workspace
 
   start_mock_registry || return
@@ -2635,6 +2737,12 @@ test_registry_version_pin_blocks_major_update() {
   local api_url="${registry_url}/api/v1"
 
   cd "$WORKSPACE" && ASKILL_REGISTRY_URL="$registry_url" ASKILL_API_BASE_URL="$api_url" $CLI add @mock/alpha@^1.0.0 -a claude-code -y --json >/dev/null 2>&1 || true
+  node -e '
+    const fs = require("fs");
+    const path = process.argv[1];
+    const content = fs.readFileSync(path, "utf8");
+    fs.writeFileSync(path, content.replace("version: 1.1.0", "version: 1.0.0"));
+  ' "$WORKSPACE/.agents/skills/alpha-collection-skill/SKILL.md"
   printf '2.0.0' > /tmp/askill-mock-mock-alpha-version
 
   local check_output
@@ -2642,13 +2750,12 @@ test_registry_version_pin_blocks_major_update() {
   if echo "$check_output" | node -e '
     const fs = require("fs");
     const data = JSON.parse(fs.readFileSync(0, "utf8"));
-    if (!data.summary || data.summary.updateAvailable !== 0 || data.summary.upToDate !== 1) process.exit(1);
+    if (!data.summary || data.summary.updateAvailable !== 1 || data.summary.upToDate !== 0) process.exit(1);
     const target = (data.skills || []).find((skill) => skill.name === "alpha-collection-skill");
-    if (!target || target.status !== "up_to_date") process.exit(1);
-    if (target.remoteVersion !== "2.0.0") process.exit(1);
-    if (typeof target.reason !== "string" || !target.reason.includes("outside locked range")) process.exit(1);
+    if (!target || target.status !== "update_available") process.exit(1);
+    if (target.localVersion !== "1.0.0" || target.remoteVersion !== "1.1.0") process.exit(1);
   '; then
-    pass "check --json does not update outside registry version range"
+    pass "check --json uses registry range-aware update candidate"
   else
     fail "registry version pin check payload mismatch"
     echo "$check_output" | strip_ansi | head -10 | sed 's/^/    /'
@@ -2659,14 +2766,28 @@ test_registry_version_pin_blocks_major_update() {
   if echo "$update_output" | node -e '
     const fs = require("fs");
     const data = JSON.parse(fs.readFileSync(0, "utf8"));
-    if (!data.summary || data.summary.updated !== 0 || data.summary.skipped !== 1) process.exit(1);
+    if (!data.summary || data.summary.updated !== 1 || data.summary.skipped !== 0) process.exit(1);
     const target = (data.results || []).find((result) => result.skill === "alpha-collection-skill");
-    if (!target || target.status !== "skipped" || target.checkStatus !== "up_to_date") process.exit(1);
+    if (!target || target.status !== "updated" || target.checkStatus !== "update_available") process.exit(1);
+    if (target.remoteVersion !== "1.1.0") process.exit(1);
   '; then
-    pass "update --json skips out-of-range registry version"
+    pass "update --json installs registry range-aware update candidate"
   else
     fail "registry version pin update payload mismatch"
     echo "$update_output" | strip_ansi | head -10 | sed 's/^/    /'
+  fi
+
+  local updated_version
+  updated_version=$(node -e '
+    const fs = require("fs");
+    const content = fs.readFileSync(process.argv[1], "utf8");
+    const match = content.match(/^version:\s*(.+)$/m);
+    process.stdout.write(match ? match[1].trim() : "");
+  ' "$WORKSPACE/.agents/skills/alpha-collection-skill/SKILL.md")
+  if [ "$updated_version" = "1.1.0" ]; then
+    pass "registry range update writes matching version"
+  else
+    fail "registry range update wrote unexpected version"
   fi
 
   stop_mock_registry
@@ -3269,11 +3390,13 @@ ALL_TESTS=(
   test_add_json_requires_selection
   test_add_skill_selector_local
   test_add_skill_selector_errors
+  test_add_skill_selector_collection_no_match
+  test_add_skill_selector_git_miss_cleans_temp
   test_add_skill_selector_collection_registry_refs
   test_add_canonical_path_relinks_agent
   test_registry_interactive_check_update
   test_registry_copy_mode_check_update
-  test_registry_version_pin_blocks_major_update
+  test_registry_version_pin_uses_range_update
   test_registry_update_keeps_locked_skill_name
   test_find_json_output
   test_dashboard_json_contracts

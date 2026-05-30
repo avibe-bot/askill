@@ -70,6 +70,28 @@ version: 2.0.0
 # Alpha Collection Skill 2
 `,
   },
+  '@mock/alpha@^1.0.0': {
+    meta: {
+      id: 106,
+      name: 'alpha-collection-skill',
+      description: 'Alpha skill latest 1.x release',
+      tags: ['collection', 'alpha'],
+      stars: 8,
+      owner: 'mock',
+      repo: 'skills',
+      path: 'alpha',
+      updatedAt: '2026-03-09T12:00:00.000Z',
+      createdAt: '2026-03-01T00:00:00.000Z',
+    },
+    raw: `---
+name: alpha-collection-skill
+description: Alpha skill latest 1.x release
+version: 1.1.0
+---
+
+# Alpha Collection Skill 1.1
+`,
+  },
   '@mock/renamed': {
     meta: {
       id: 105,
@@ -155,7 +177,7 @@ const server = createServer((req, res) => {
       skills: [
         { id: 101, skillName: 'alpha-collection-skill', description: 'Alpha skill from shared collection', repoOwner: 'mock', repoName: 'skills', filePath: 'alpha/SKILL.md', tags: ['collection', 'alpha'], installRef: '@mock/alpha' },
         { id: 102, skillName: 'beta-collection-skill', description: 'Beta skill from shared collection', repoOwner: 'mock', repoName: 'skills', filePath: 'beta/SKILL.md', tags: ['collection', 'beta'], installRef: '@mock/beta' },
-        { id: 103, skillName: 'broken-entry', description: 'This entry intentionally fails to resolve', repoOwner: 'mock', repoName: 'skills', filePath: 'broken/SKILL.md', tags: ['collection'], installRef: '@mock/missing' },
+        { id: 103, skillName: null, description: 'This entry intentionally fails to resolve', repoOwner: 'mock', repoName: 'skills', filePath: 'broken/SKILL.md', tags: ['collection'], installRef: '@mock/missing' },
       ],
     });
     return;

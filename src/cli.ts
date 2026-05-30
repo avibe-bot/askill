@@ -18,7 +18,7 @@ import { addSkillToLock, removeSkillFromLock, fetchSkillFolderHash, saveLastSele
 import { resolveRemoveTarget, isPathLikeRemoveTarget } from './remove-target.ts';
 import { join, normalize, resolve } from 'path';
 import { homedir } from 'os';
-import { readFile } from 'fs/promises';
+import { access, readFile } from 'fs/promises';
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
 import semver from 'semver';
@@ -439,7 +439,7 @@ async function resolveSkills(
       }
     }
 
-    if (collectionItems.length > 0 && resolvedSkills.length === 0) {
+    if (collectionItems.length > 0 && resolvedSkills.length === 0 && !options.skill) {
       throw new Error(`Collection ${collectionOwner}/${collectionHandle} does not contain any installable skills`);
     }
 
@@ -709,10 +709,19 @@ async function runInstallJson(skillName: string, options: InstallOptions): Promi
   try {
     if (discoveredSkills.length === 0) {
       if (options.skill) {
-        printJsonError('SKILL_NOT_FOUND', `Skill "${options.skill}" not found in source`, {
-          source: skillName,
-          requestedSkill: options.skill,
+        printJson({
+          ok: false,
+          error: {
+            code: 'SKILL_NOT_FOUND',
+            message: `Skill "${options.skill}" not found in source`,
+            details: {
+              source: skillName,
+              requestedSkill: options.skill,
+            },
+          },
         });
+        process.exitCode = 1;
+        return;
       }
 
       printJson({
@@ -2686,8 +2695,9 @@ function uncheckableReason(entry: SkillLockEntry): string | null {
   return null;
 }
 
-function latestRegistrySlug(source: string): string {
-  return parseRegistrySource(source).slug;
+function registryLookupSlug(source: string): string {
+  const parsed = parseRegistrySource(source);
+  return parsed.range ? source : parsed.slug;
 }
 
 function parseRegistrySource(source: string): { slug: string; range: string | null } {
@@ -2752,8 +2762,17 @@ async function readSkillVersionFromDir(skillDir: string): Promise<string | null>
   }
 }
 
+async function hasSkillMd(skillDir: string): Promise<boolean> {
+  try {
+    await access(join(skillDir, 'SKILL.md'));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function getRegistrySkillVersion(source: string): Promise<string | null> {
-  const content = await api.getSkillRaw(latestRegistrySlug(source));
+  const content = await api.getSkillRaw(registryLookupSlug(source));
   return stringOrNull(parseSkillMd(content).frontmatter.version);
 }
 
@@ -3050,11 +3069,12 @@ async function updateRegistrySkillJson(
   lockOptions: { global: boolean }
 ): Promise<SkillUpdateResult> {
   try {
-    const content = await api.getSkillRaw(latestRegistrySlug(check.source));
+    const content = await api.getSkillRaw(registryLookupSlug(check.source));
+    const installMode = await detectRegistryUpdateInstallMode(check.name, targetAgents, lockOptions.global);
     const installErrors: string[] = [];
 
     for (const agent of targetAgents) {
-      const result = await installSkill(check.name, content, agent, { mode: 'symlink', global: lockOptions.global });
+      const result = await installSkill(check.name, content, agent, { mode: installMode, global: lockOptions.global });
       if (!result.success) {
         installErrors.push(`${agent}: ${result.error || 'Unknown error'}`);
       }
@@ -3107,6 +3127,26 @@ async function updateRegistrySkillJson(
       agents: targetAgents.map(toAgentOutput),
     };
   }
+}
+
+async function detectRegistryUpdateInstallMode(
+  skillName: string,
+  targetAgents: AgentType[],
+  globalScope: boolean
+): Promise<InstallMode> {
+  const sanitizedName = sanitizeName(skillName);
+  const canonicalDir = join(getCanonicalSkillsDir(globalScope), sanitizedName);
+  if (await hasSkillMd(canonicalDir)) return 'symlink';
+
+  for (const agentType of targetAgents) {
+    const agent = agents[agentType];
+    if (!agent || (globalScope && !agent.globalSkillsDir)) continue;
+
+    const baseDir = globalScope ? agent.globalSkillsDir! : join(process.cwd(), agent.skillsDir);
+    if (await hasSkillMd(join(baseDir, sanitizedName))) return 'copy';
+  }
+
+  return 'symlink';
 }
 
 async function updateOneSkillJson(
