@@ -97,6 +97,7 @@ clean_workspace() {
   rm -rf /root/.agents
   rm -rf /root/.config/askill
   rm -rf /root/.askill
+  rm -f /tmp/askill-mock-*-version
   mkdir -p "$WORKSPACE"
 }
 
@@ -2343,6 +2344,77 @@ SKILL
 }
 
 # ════════════════════════════════════════════════════
+# Test: Add --skill selector errors
+# ════════════════════════════════════════════════════
+test_add_skill_selector_errors() {
+  header "Add --skill selector errors"
+  clean_workspace
+
+  local src="/tmp/test-skill-selector-errors"
+  rm -rf "$src"
+  mkdir -p "$src/alpha"
+
+  cat > "$src/alpha/SKILL.md" <<'SKILL'
+---
+name: selector-error-alpha
+description: selector error alpha skill
+version: 1.0.0
+---
+# Selector Error Alpha
+SKILL
+
+  local output
+  local code=0
+  output=$(cd "$WORKSPACE" && $CLI add "$src" --skill -y --json 2>&1) || code=$?
+  if [ "$code" -eq 1 ]; then
+    pass "add --skill without value exits non-zero"
+  else
+    fail "add --skill without value should fail (exit=$code)"
+  fi
+
+  if echo "$output" | node -e '
+    const fs = require("fs");
+    const data = JSON.parse(fs.readFileSync(0, "utf8"));
+    if (data.ok !== false) process.exit(1);
+    if (!data.error || data.error.code !== "MISSING_SKILL_OPTION_VALUE") process.exit(1);
+  '; then
+    pass "add --skill without value reports structured error"
+  else
+    fail "add --skill without value payload mismatch"
+    echo "$output" | strip_ansi | head -10 | sed 's/^/    /'
+  fi
+
+  code=0
+  output=$(cd "$WORKSPACE" && $CLI add "$src" --skill does-not-exist -a claude-code -y --json 2>&1) || code=$?
+  if [ "$code" -eq 1 ]; then
+    pass "add --skill no match exits non-zero"
+  else
+    fail "add --skill no match should fail (exit=$code)"
+  fi
+
+  if echo "$output" | node -e '
+    const fs = require("fs");
+    const data = JSON.parse(fs.readFileSync(0, "utf8"));
+    if (data.ok !== false) process.exit(1);
+    if (!data.error || data.error.code !== "SKILL_NOT_FOUND") process.exit(1);
+    if (!data.error.details || data.error.details.requestedSkill !== "does-not-exist") process.exit(1);
+  '; then
+    pass "add --skill no match reports structured error"
+  else
+    fail "add --skill no match payload mismatch"
+    echo "$output" | strip_ansi | head -10 | sed 's/^/    /'
+  fi
+
+  if [ ! -e "$WORKSPACE/.claude/skills/selector-error-alpha" ]; then
+    pass "add --skill no match installs nothing"
+  else
+    fail "add --skill no match unexpectedly installed a skill"
+  fi
+
+  rm -rf "$src"
+}
+
+# ════════════════════════════════════════════════════
 # Test: Add --skill selector for registry refs inside collections
 # ════════════════════════════════════════════════════
 test_add_skill_selector_collection_registry_refs() {
@@ -2474,6 +2546,187 @@ test_registry_interactive_check_update() {
     pass "interactive update writes latest registry SKILL.md"
   else
     fail "interactive update did not refresh registry skill version"
+  fi
+
+  stop_mock_registry
+}
+
+# ════════════════════════════════════════════════════
+# Test: Registry copy-mode check/update
+# ════════════════════════════════════════════════════
+test_registry_copy_mode_check_update() {
+  header "Registry copy-mode check/update"
+  clean_workspace
+
+  start_mock_registry || return
+
+  local registry_url="http://127.0.0.1:${MOCK_REGISTRY_PORT}"
+  local api_url="${registry_url}/api/v1"
+
+  cd "$WORKSPACE" && ASKILL_REGISTRY_URL="$registry_url" ASKILL_API_BASE_URL="$api_url" $CLI add @mock/alpha -a claude-code --copy -y --json >/dev/null 2>&1 || true
+  if [ ! -e "$WORKSPACE/.agents/skills/alpha-collection-skill" ] && [ -f "$WORKSPACE/.claude/skills/alpha-collection-skill/SKILL.md" ]; then
+    pass "copy-mode registry install only writes agent directory"
+  else
+    fail "copy-mode registry install did not create expected layout"
+  fi
+
+  node -e '
+    const fs = require("fs");
+    const path = process.argv[1];
+    const content = fs.readFileSync(path, "utf8");
+    fs.writeFileSync(path, content.replace("version: 1.0.0", "version: 1.0.0-alpha.1"));
+  ' "$WORKSPACE/.claude/skills/alpha-collection-skill/SKILL.md"
+
+  local check_output
+  check_output=$(cd "$WORKSPACE" && ASKILL_REGISTRY_URL="$registry_url" ASKILL_API_BASE_URL="$api_url" $CLI check --json 2>&1) || true
+  if echo "$check_output" | node -e '
+    const fs = require("fs");
+    const data = JSON.parse(fs.readFileSync(0, "utf8"));
+    const target = (data.skills || []).find((skill) => skill.name === "alpha-collection-skill");
+    if (!target || target.status !== "update_available") process.exit(1);
+    if (target.localVersion !== "1.0.0-alpha.1" || target.remoteVersion !== "1.0.0") process.exit(1);
+  '; then
+    pass "check --json reads copy-mode registry version from agent dir"
+  else
+    fail "copy-mode registry check payload mismatch"
+    echo "$check_output" | strip_ansi | head -10 | sed 's/^/    /'
+  fi
+
+  local update_output
+  update_output=$(cd "$WORKSPACE" && ASKILL_REGISTRY_URL="$registry_url" ASKILL_API_BASE_URL="$api_url" $CLI update --json 2>&1) || true
+  if echo "$update_output" | node -e '
+    const fs = require("fs");
+    const data = JSON.parse(fs.readFileSync(0, "utf8"));
+    const target = (data.results || []).find((result) => result.skill === "alpha-collection-skill");
+    if (!target || target.status !== "updated") process.exit(1);
+  '; then
+    pass "update --json updates copy-mode registry install"
+  else
+    fail "copy-mode registry update payload mismatch"
+    echo "$update_output" | strip_ansi | head -10 | sed 's/^/    /'
+  fi
+
+  local updated_version
+  updated_version=$(node -e '
+    const fs = require("fs");
+    const content = fs.readFileSync(process.argv[1], "utf8");
+    const match = content.match(/^version:\s*(.+)$/m);
+    process.stdout.write(match ? match[1].trim() : "");
+  ' "$WORKSPACE/.claude/skills/alpha-collection-skill/SKILL.md")
+  if [ "$updated_version" = "1.0.0" ]; then
+    pass "copy-mode registry update writes latest SKILL.md"
+  else
+    fail "copy-mode registry update did not refresh version"
+  fi
+
+  stop_mock_registry
+}
+
+# ════════════════════════════════════════════════════
+# Test: Registry version pins block out-of-range latest
+# ════════════════════════════════════════════════════
+test_registry_version_pin_blocks_major_update() {
+  header "Registry version pin blocks major update"
+  clean_workspace
+
+  start_mock_registry || return
+
+  local registry_url="http://127.0.0.1:${MOCK_REGISTRY_PORT}"
+  local api_url="${registry_url}/api/v1"
+
+  cd "$WORKSPACE" && ASKILL_REGISTRY_URL="$registry_url" ASKILL_API_BASE_URL="$api_url" $CLI add @mock/alpha@^1.0.0 -a claude-code -y --json >/dev/null 2>&1 || true
+  printf '2.0.0' > /tmp/askill-mock-mock-alpha-version
+
+  local check_output
+  check_output=$(cd "$WORKSPACE" && ASKILL_REGISTRY_URL="$registry_url" ASKILL_API_BASE_URL="$api_url" $CLI check --json 2>&1) || true
+  if echo "$check_output" | node -e '
+    const fs = require("fs");
+    const data = JSON.parse(fs.readFileSync(0, "utf8"));
+    if (!data.summary || data.summary.updateAvailable !== 0 || data.summary.upToDate !== 1) process.exit(1);
+    const target = (data.skills || []).find((skill) => skill.name === "alpha-collection-skill");
+    if (!target || target.status !== "up_to_date") process.exit(1);
+    if (target.remoteVersion !== "2.0.0") process.exit(1);
+    if (typeof target.reason !== "string" || !target.reason.includes("outside locked range")) process.exit(1);
+  '; then
+    pass "check --json does not update outside registry version range"
+  else
+    fail "registry version pin check payload mismatch"
+    echo "$check_output" | strip_ansi | head -10 | sed 's/^/    /'
+  fi
+
+  local update_output
+  update_output=$(cd "$WORKSPACE" && ASKILL_REGISTRY_URL="$registry_url" ASKILL_API_BASE_URL="$api_url" $CLI update --json 2>&1) || true
+  if echo "$update_output" | node -e '
+    const fs = require("fs");
+    const data = JSON.parse(fs.readFileSync(0, "utf8"));
+    if (!data.summary || data.summary.updated !== 0 || data.summary.skipped !== 1) process.exit(1);
+    const target = (data.results || []).find((result) => result.skill === "alpha-collection-skill");
+    if (!target || target.status !== "skipped" || target.checkStatus !== "up_to_date") process.exit(1);
+  '; then
+    pass "update --json skips out-of-range registry version"
+  else
+    fail "registry version pin update payload mismatch"
+    echo "$update_output" | strip_ansi | head -10 | sed 's/^/    /'
+  fi
+
+  stop_mock_registry
+}
+
+# ════════════════════════════════════════════════════
+# Test: Registry updates stay on locked skill name
+# ════════════════════════════════════════════════════
+test_registry_update_keeps_locked_skill_name() {
+  header "Registry update keeps locked skill name"
+  clean_workspace
+
+  start_mock_registry || return
+
+  local registry_url="http://127.0.0.1:${MOCK_REGISTRY_PORT}"
+  local api_url="${registry_url}/api/v1"
+
+  cd "$WORKSPACE" && ASKILL_REGISTRY_URL="$registry_url" ASKILL_API_BASE_URL="$api_url" $CLI add @mock/alpha -a claude-code -y --json >/dev/null 2>&1 || true
+  node -e '
+    const fs = require("fs");
+    const lockPath = process.argv[1];
+    const data = JSON.parse(fs.readFileSync(lockPath, "utf8"));
+    data.skills["alpha-collection-skill"].source = "@mock/renamed";
+    data.skills["alpha-collection-skill"].sourceUrl = "@mock/renamed";
+    fs.writeFileSync(lockPath, JSON.stringify(data, null, 2));
+  ' "$PROJECT_LOCK"
+
+  local update_output
+  update_output=$(cd "$WORKSPACE" && ASKILL_REGISTRY_URL="$registry_url" ASKILL_API_BASE_URL="$api_url" $CLI update --json 2>&1) || true
+  if echo "$update_output" | node -e '
+    const fs = require("fs");
+    const data = JSON.parse(fs.readFileSync(0, "utf8"));
+    const target = (data.results || []).find((result) => result.skill === "alpha-collection-skill");
+    if (!target || target.status !== "updated") process.exit(1);
+  '; then
+    pass "update --json updates renamed registry source"
+  else
+    fail "renamed registry update payload mismatch"
+    echo "$update_output" | strip_ansi | head -10 | sed 's/^/    /'
+  fi
+
+  if [ -f "$WORKSPACE/.agents/skills/alpha-collection-skill/SKILL.md" ] && [ ! -e "$WORKSPACE/.agents/skills/renamed-remote-skill" ]; then
+    pass "registry update keeps locked install directory"
+  else
+    fail "registry update wrote renamed install directory"
+  fi
+
+  local check_output
+  check_output=$(cd "$WORKSPACE" && ASKILL_REGISTRY_URL="$registry_url" ASKILL_API_BASE_URL="$api_url" $CLI check --json 2>&1) || true
+  if echo "$check_output" | node -e '
+    const fs = require("fs");
+    const data = JSON.parse(fs.readFileSync(0, "utf8"));
+    const target = (data.skills || []).find((skill) => skill.name === "alpha-collection-skill");
+    if (!target || target.status !== "up_to_date") process.exit(1);
+    if (target.localVersion !== "1.1.0" || target.remoteVersion !== "1.1.0") process.exit(1);
+  '; then
+    pass "registry renamed update converges on next check"
+  else
+    fail "renamed registry follow-up check mismatch"
+    echo "$check_output" | strip_ansi | head -10 | sed 's/^/    /'
   fi
 
   stop_mock_registry
@@ -3015,9 +3268,13 @@ ALL_TESTS=(
   test_add_json_invalid_agent
   test_add_json_requires_selection
   test_add_skill_selector_local
+  test_add_skill_selector_errors
   test_add_skill_selector_collection_registry_refs
   test_add_canonical_path_relinks_agent
   test_registry_interactive_check_update
+  test_registry_copy_mode_check_update
+  test_registry_version_pin_blocks_major_update
+  test_registry_update_keeps_locked_skill_name
   test_find_json_output
   test_dashboard_json_contracts
   test_reinstall_skill

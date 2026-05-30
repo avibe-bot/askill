@@ -319,6 +319,7 @@ interface InstallOptions {
   global?: boolean;
   agent?: string[];
   skill?: string;
+  skillOptionMissing?: boolean;
   yes?: boolean;
   copy?: boolean;
   list?: boolean;
@@ -349,6 +350,8 @@ function parseInstallOptions(args: string[]): { skillName: string; options: Inst
       if (args[i + 1] && !args[i + 1].startsWith('-')) {
         options.skill = args[i + 1];
         i += 1;
+      } else {
+        options.skillOptionMissing = true;
       }
     } else if (arg === '-a' || arg === '--agent') {
       const parsed = parseAgentOptionValues(args, i + 1);
@@ -688,6 +691,10 @@ async function shouldPreserveExistingLockForCanonicalRelink(
 }
 
 async function runInstallJson(skillName: string, options: InstallOptions): Promise<void> {
+  if (options.skillOptionMissing) {
+    printJsonError('MISSING_SKILL_OPTION_VALUE', '--skill requires a value');
+  }
+
   if (!skillName) {
     printJsonError('MISSING_SKILL', 'Missing skill identifier');
   }
@@ -701,6 +708,13 @@ async function runInstallJson(skillName: string, options: InstallOptions): Promi
 
   try {
     if (discoveredSkills.length === 0) {
+      if (options.skill) {
+        printJsonError('SKILL_NOT_FOUND', `Skill "${options.skill}" not found in source`, {
+          source: skillName,
+          requestedSkill: options.skill,
+        });
+      }
+
       printJson({
         ok: true,
         action: options.list ? 'preview' : 'install',
@@ -1029,6 +1043,16 @@ async function runInstallJson(skillName: string, options: InstallOptions): Promi
 
 async function runInstall(args: string[]): Promise<void> {
   const { skillName, options } = parseInstallOptions(args);
+  if (options.skillOptionMissing) {
+    if (options.json) {
+      printJsonError('MISSING_SKILL_OPTION_VALUE', '--skill requires a value');
+    }
+
+    console.log(`${RED}Error: --skill requires a value${RESET}`);
+    console.log(`Usage: askill add <source> --skill <name>`);
+    process.exit(1);
+  }
+
   if (options.json) {
     await runInstallJson(skillName, options);
     return;
@@ -1069,6 +1093,12 @@ async function runInstall(args: string[]): Promise<void> {
   try {
 
   if (discoveredSkills.length === 0) {
+    if (options.skill) {
+      p.log.error(`Skill "${options.skill}" not found in ${pc.cyan(skillName)}`);
+      process.exitCode = 1;
+      return;
+    }
+
     p.log.warning('No skills found');
     if (plainMode) {
       console.log(`Browse skills at ${pc.cyan('https://askill.sh')}`);
@@ -2657,8 +2687,12 @@ function uncheckableReason(entry: SkillLockEntry): string | null {
 }
 
 function latestRegistrySlug(source: string): string {
-  const match = source.match(/^(@[^/]+\/[^@/]+)(?:@[^/]+)?$/);
-  return match ? match[1] : source;
+  return parseRegistrySource(source).slug;
+}
+
+function parseRegistrySource(source: string): { slug: string; range: string | null } {
+  const match = source.match(/^(@[^/]+\/[^@/]+)(?:@(.+))?$/);
+  return match ? { slug: match[1], range: match[2] || null } : { slug: source, range: null };
 }
 
 function compareVersionStrings(localVersion: string, remoteVersion: string): number {
@@ -2682,13 +2716,40 @@ function formatCheckDelta(result: Pick<SkillCheckResult, 'localHash' | 'remoteHa
 }
 
 async function getInstalledSkillVersion(skillName: string, globalScope: boolean): Promise<string | null> {
+  const sanitizedName = sanitizeName(skillName);
   const installedSkills = await listInstalledSkills({ global: globalScope });
   const installed = installedSkills.find((skill) => (
-    skill.name === skillName || sanitizeName(skill.name) === sanitizeName(skillName)
+    skill.name === skillName || sanitizeName(skill.name) === sanitizedName
   ));
-  if (!installed) return null;
-  const frontmatter = await readInstalledSkillFrontmatter(installed);
-  return stringOrNull(frontmatter.version);
+  if (installed) {
+    const frontmatter = await readInstalledSkillFrontmatter(installed);
+    const version = stringOrNull(frontmatter.version);
+    if (version) return version;
+  }
+
+  const lastAgents = await getLastSelectedAgents({ global: globalScope }).catch(() => undefined);
+  const candidateAgents = Array.from(new Set([...(lastAgents || []), ...Object.keys(agents)]))
+    .filter((agent): agent is AgentType => Boolean(agents[agent]));
+
+  for (const agentType of candidateAgents) {
+    const agent = agents[agentType];
+    if (globalScope && !agent.globalSkillsDir) continue;
+
+    const baseDir = globalScope ? agent.globalSkillsDir! : join(process.cwd(), agent.skillsDir);
+    const version = await readSkillVersionFromDir(join(baseDir, sanitizedName));
+    if (version) return version;
+  }
+
+  return null;
+}
+
+async function readSkillVersionFromDir(skillDir: string): Promise<string | null> {
+  try {
+    const content = await readFile(join(skillDir, 'SKILL.md'), 'utf-8');
+    return stringOrNull(parseSkillMd(content).frontmatter.version);
+  } catch {
+    return null;
+  }
 }
 
 async function getRegistrySkillVersion(source: string): Promise<string | null> {
@@ -2726,6 +2787,44 @@ async function checkRegistrySkillVersion(
         status: 'uncheckable',
         reason: 'no registry version available',
       };
+    }
+
+    const registryRange = parseRegistrySource(entry.source || entry.sourceUrl).range;
+    if (registryRange) {
+      const validRange = semver.validRange(registryRange);
+      if (!validRange) {
+        return {
+          ...base,
+          localVersion,
+          remoteHash: null,
+          remoteVersion,
+          status: 'uncheckable',
+          reason: `invalid registry version range: ${registryRange}`,
+        };
+      }
+
+      const validRemoteVersion = semver.valid(remoteVersion);
+      if (!validRemoteVersion) {
+        return {
+          ...base,
+          localVersion,
+          remoteHash: null,
+          remoteVersion,
+          status: 'uncheckable',
+          reason: 'registry version is not valid semver',
+        };
+      }
+
+      if (!semver.satisfies(validRemoteVersion, validRange)) {
+        return {
+          ...base,
+          localVersion,
+          remoteHash: null,
+          remoteVersion,
+          status: 'up_to_date',
+          reason: `latest registry version ${remoteVersion} is outside locked range ${registryRange}`,
+        };
+      }
     }
 
     return {
@@ -2952,12 +3051,10 @@ async function updateRegistrySkillJson(
 ): Promise<SkillUpdateResult> {
   try {
     const content = await api.getSkillRaw(latestRegistrySlug(check.source));
-    const parsedContent = parseSkillMd(content);
-    const resolvedName = parsedContent.frontmatter.name || check.name;
     const installErrors: string[] = [];
 
     for (const agent of targetAgents) {
-      const result = await installSkill(resolvedName, content, agent, { mode: 'symlink', global: lockOptions.global });
+      const result = await installSkill(check.name, content, agent, { mode: 'symlink', global: lockOptions.global });
       if (!result.success) {
         installErrors.push(`${agent}: ${result.error || 'Unknown error'}`);
       }
