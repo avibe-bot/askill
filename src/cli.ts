@@ -11,6 +11,7 @@ import { getPreferredAgents, savePreferredAgents } from './config.ts';
 import { loadCredentials, saveCredentials, clearCredentials, maskToken } from './credentials.ts';
 import { extractDependencies, isValidDependencySpec, parseDependency, dependencyToSlug, parseSkillMd } from './parser.ts';
 import { parseSource, type ParsedSource } from './source-parser.ts';
+import { getRequestedSkill } from './install-request.ts';
 import { discoverSkills, filterSkills, type DiscoveredSkill } from './discover.ts';
 import { getCollectionInstallRefs } from './collection.ts';
 import { cloneRepo, cleanupTempDir, GitCloneError } from './git.ts';
@@ -704,6 +705,7 @@ async function runInstallJson(skillName: string, options: InstallOptions): Promi
 
   const spinner = createSpinner(true);
   const { skills: discoveredSkills, parsed: sourceParsed, tempDir } = await resolveSkills(skillName, spinner, options);
+  const requestedSkill = getRequestedSkill(skillName, sourceParsed, options.skill);
 
   const cleanup = async () => {
     if (tempDir) await cleanupTempDir(tempDir).catch(() => {});
@@ -711,15 +713,15 @@ async function runInstallJson(skillName: string, options: InstallOptions): Promi
 
   try {
     if (discoveredSkills.length === 0) {
-      if (options.skill) {
+      if (requestedSkill) {
         printJson({
           ok: false,
           error: {
             code: 'SKILL_NOT_FOUND',
-            message: `Skill "${options.skill}" not found in source`,
+            message: `Skill "${requestedSkill.name}" not found in source`,
             details: {
-              source: skillName,
-              requestedSkill: options.skill,
+              source: requestedSkill.source,
+              requestedSkill: requestedSkill.name,
             },
           },
         });
@@ -1096,6 +1098,7 @@ async function runInstall(args: string[]): Promise<void> {
 
   // Step 1: Resolve skills (clone or API)
   const { skills: discoveredSkills, parsed: sourceParsed, tempDir } = await resolveSkills(skillName, spinner, options);
+  const requestedSkill = getRequestedSkill(skillName, sourceParsed, options.skill);
 
   // Ensure tempDir is always cleaned up, even on cancel/error/process.exit
   const cleanup = async () => {
@@ -1105,8 +1108,8 @@ async function runInstall(args: string[]): Promise<void> {
   try {
 
   if (discoveredSkills.length === 0) {
-    if (options.skill) {
-      p.log.error(`Skill "${options.skill}" not found in ${pc.cyan(skillName)}`);
+    if (requestedSkill) {
+      p.log.error(`Skill "${requestedSkill.name}" not found in ${pc.cyan(requestedSkill.source)}`);
       process.exitCode = 1;
       return;
     }
