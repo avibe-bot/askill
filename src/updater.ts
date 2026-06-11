@@ -2,11 +2,12 @@
 
 import { existsSync, createWriteStream, unlinkSync, chmodSync, renameSync } from 'fs';
 import { join, dirname } from 'path';
-import { homedir, platform, arch } from 'os';
+import { homedir } from 'os';
 import { pipeline } from 'stream/promises';
 import { Readable } from 'stream';
 import semver from 'semver';
 import { VERSION, CYAN, GREEN, YELLOW, RED, RESET, DIM } from './constants.ts';
+import { getPlatformKey } from './platform.ts';
 
 const UPDATE_CHECK_FILE = join(homedir(), '.askill', 'last-update-check');
 const UPDATE_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -26,24 +27,6 @@ export interface AvailableUpdate {
   minimum: string;
   releaseNotes: string;
   releaseUrl?: string;
-}
-
-/**
- * Get platform key for download URL
- */
-function getPlatformKey(): string {
-  const p = platform();
-  const a = arch();
-
-  if (p === 'darwin') {
-    return a === 'arm64' ? 'darwin-arm64' : 'darwin-x64';
-  } else if (p === 'linux') {
-    return a === 'arm64' ? 'linux-arm64' : 'linux-x64';
-  } else if (p === 'win32') {
-    return 'win32-x64';
-  }
-
-  return `${p}-${a}`;
 }
 
 /**

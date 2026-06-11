@@ -74,6 +74,12 @@ detect_platform() {
     *)       error "Unsupported OS: $OS" ;;
   esac
 
+  if [ "$OS" = "darwin" ] && [ "$ARCH" = "x86_64" ] && command -v sysctl >/dev/null 2>&1; then
+    if [ "$(sysctl -in sysctl.proc_translated 2>/dev/null || true)" = "1" ]; then
+      ARCH="arm64"
+    fi
+  fi
+
   case "$ARCH" in
     x86_64|amd64)  ARCH="x64" ;;
     aarch64|arm64) ARCH="arm64" ;;
