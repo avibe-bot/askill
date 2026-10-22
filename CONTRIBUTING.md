@@ -16,7 +16,7 @@ Thank you for your interest in contributing to askill! This document provides gu
 
 ### Prerequisites
 
-- Node.js 20+
+- Node.js 22+
 - npm or bun
 - Docker (for E2E tests)
 - Git
