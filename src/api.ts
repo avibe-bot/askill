@@ -133,8 +133,8 @@ export interface PublishResponse {
   message: string;
 }
 
-// Indexing a large repository can leave the connection idle while the server works.
-const SUBMIT_TIMEOUT_MS = 10 * 60_000;
+// Allow slow indexing while staying below Node's five-minute response-header timeout.
+const SUBMIT_TIMEOUT_MS = 4 * 60_000;
 
 class APIClient {
   private baseUrl: string;

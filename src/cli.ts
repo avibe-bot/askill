@@ -4057,12 +4057,14 @@ async function runInit(args: string[]): Promise<void> {
 // Submit / Auth / Publish Commands
 // ============================================
 
-function isRequestTimeout(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  const cause = error.cause;
-  const code = cause instanceof Error && 'code' in cause ? cause.code : 'code' in error ? error.code : undefined;
-  return error.name === 'TimeoutError' || code === 'ETIMEDOUT' ||
-    code === 'UND_ERR_CONNECT_TIMEOUT' || code === 'UND_ERR_HEADERS_TIMEOUT' || code === 'UND_ERR_BODY_TIMEOUT';
+function timeoutPhase(error: unknown): 'connect' | 'unknown' | undefined {
+  if (!(error instanceof Error)) return;
+  const detail = error.cause instanceof Error ? error.cause : error;
+  const code = 'code' in detail ? detail.code : undefined;
+  if (code === 'UND_ERR_CONNECT_TIMEOUT' ||
+      (code === 'ETIMEDOUT' && 'syscall' in detail && detail.syscall === 'connect')) return 'connect';
+  if (error.name === 'TimeoutError' || code === 'ETIMEDOUT' ||
+      code === 'UND_ERR_HEADERS_TIMEOUT' || code === 'UND_ERR_BODY_TIMEOUT') return 'unknown';
 }
 
 async function runSubmit(args: string[]): Promise<void> {
@@ -4091,7 +4093,10 @@ async function runSubmit(args: string[]): Promise<void> {
     p.outro(pc.green(`Submitted ${pc.cyan(`${result.repoOwner}/${result.repoName}`)}`));
   } catch (error) {
     spinner.stop(pc.red('Submit failed'));
-    if (isRequestTimeout(error)) {
+    const phase = timeoutPhase(error);
+    if (phase === 'connect') {
+      p.log.error('Timed out connecting to the registry. Check your connection and try again.');
+    } else if (phase) {
       p.log.error('Timed out waiting for indexing. The server may still process this submission; check the registry before retrying.');
     } else {
       p.log.error(error instanceof Error ? error.message : 'Unknown error');
@@ -4141,7 +4146,7 @@ async function runLogin(args: string[]): Promise<void> {
   } catch (error) {
     const rejected = error instanceof APIError && (error.status === 401 || error.status === 403);
     spinner.stop(pc.red(rejected ? 'Invalid token' : 'Login unsuccessful'));
-    if (isRequestTimeout(error)) {
+    if (timeoutPhase(error)) {
       p.log.error('Token verification timed out. Check your connection and try again.');
     } else {
       p.log.error(error instanceof Error ? error.message : 'Unknown error');

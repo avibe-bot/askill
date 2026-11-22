@@ -16,28 +16,34 @@ test('submit allows a slow indexer but still has a finite deadline', async (t) =
   assert.equal(options.method, 'POST');
   assert.ok('timeout' in options && options.timeout === false, 'Bun must not terminate an idle request before our deadline');
   assert.equal(timeout.mock.callCount(), 1);
-  assert.ok(timeout.mock.calls[0].arguments[0] > 90_000);
+  assert.equal(timeout.mock.calls[0].arguments[0], 4 * 60_000);
   assert.equal(options.signal, timeout.mock.calls[0].result);
 });
 
 // Exercise the actual CLI failure path with a fake token, stubbed fetch, and an isolated home directory.
-for (const [scenario, respond, expected] of [
-  ['null 401', 'return Response.json(null, { status: 401 })', /Invalid token[\s\S]*HTTP 401/i],
-  ['structured 401', "return Response.json({ error: { message: 'Token expired' } }, { status: 401 })", /Invalid token[\s\S]*Token expired/i],
-  ['503', 'return new Response(null, { status: 503 })', /HTTP 503/i],
-  ['timeout', "throw new DOMException('deadline exceeded', 'TimeoutError')", /timed out/i],
+for (const [command, scenario, respond, expected] of [
+  ['login', 'null 401', 'return Response.json(null, { status: 401 })', /Invalid token[\s\S]*HTTP 401/i],
+  ['login', 'structured 401', "return Response.json({ error: { message: 'Token expired' } }, { status: 401 })", /Invalid token[\s\S]*Token expired/i],
+  ['login', '503', 'return new Response(null, { status: 503 })', /HTTP 503/i],
+  ['login', 'timeout', "throw new DOMException('deadline exceeded', 'TimeoutError')", /timed out/i],
+  ['submit', 'connect timeout', "throw new TypeError('fetch failed', { cause: Object.assign(new Error(), { code: 'UND_ERR_CONNECT_TIMEOUT' }) })", /timed out connecting/i],
+  ['submit', 'headers timeout', "throw new TypeError('fetch failed', { cause: Object.assign(new Error(), { code: 'UND_ERR_HEADERS_TIMEOUT' }) })", /check the registry before retrying/i],
+  ['submit', 'deadline', "throw new DOMException('deadline exceeded', 'TimeoutError')", /check the registry before retrying/i],
 ] as const) {
-  test(`login: ${scenario}`, () => {
-    const home = mkdtempSync(join(tmpdir(), 'askill-login-'));
+  test(`${command}: ${scenario}`, () => {
+    const home = mkdtempSync(join(tmpdir(), 'askill-cli-'));
     try {
-      const mock = `globalThis.fetch = async url => { if (!url.endsWith('/auth/me')) return Response.json({ minimum: '0.1.0', latest: '0.1.0' }); ${respond}; }`;
-      const result = spawnSync(process.execPath, [...process.execArgv, '--import', `data:text/javascript,${encodeURIComponent(mock)}`, 'src/cli.ts', 'login', '--token', 'test-only-token'], {
+      const endpoint = command === 'login' ? '/auth/me' : '/submit';
+      const args = command === 'login' ? ['--token', 'test-only-token'] : ['https://github.com/example/skills'];
+      const mock = `globalThis.fetch = async url => { if (!url.endsWith('${endpoint}')) return Response.json({ minimum: '0.1.0', latest: '0.1.0' }); ${respond}; }`;
+      const result = spawnSync(process.execPath, [...process.execArgv, '--import', `data:text/javascript,${encodeURIComponent(mock)}`, 'src/cli.ts', command, ...args], {
         env: { ...process.env, HOME: home, USERPROFILE: home, ASKILL_API_BASE_URL: 'http://127.0.0.1:1', NO_COLOR: '1' },
         encoding: 'utf8', timeout: 10_000,
       });
       const output = result.stdout + result.stderr;
       assert.equal(result.status, 1, output);
       assert.match(output, expected);
+      if (scenario === 'connect timeout') assert.doesNotMatch(output, /may still process|check the registry/i);
       if (!scenario.includes('401')) assert.doesNotMatch(output, /invalid token/i);
       assert.doesNotMatch(output, /test-only-token/);
       assert.equal(existsSync(join(home, '.askill', 'credentials.json')), false);
