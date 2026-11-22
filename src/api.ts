@@ -133,6 +133,9 @@ export interface PublishResponse {
   message: string;
 }
 
+// Allow slow indexing while staying below Node's five-minute response-header timeout.
+const SUBMIT_TIMEOUT_MS = 4 * 60_000;
+
 class APIClient {
   private baseUrl: string;
 
@@ -140,7 +143,7 @@ class APIClient {
     this.baseUrl = baseUrl;
   }
 
-  private async fetch<T>(path: string, options?: RequestInit): Promise<T> {
+  private async fetch<T>(path: string, options?: RequestInit & { timeout?: false }): Promise<T> {
     const url = `${this.baseUrl}${path}`;
     const response = await fetch(url, {
       ...options,
@@ -155,8 +158,8 @@ class APIClient {
       const error = await response.json().catch(() => ({}));
       throw new APIError(
         response.status,
-        error.error?.code || 'UNKNOWN_ERROR',
-        error.error?.message || `HTTP ${response.status}`
+        error?.error?.code || 'UNKNOWN_ERROR',
+        error?.error?.message || `HTTP ${response.status}`
       );
     }
 
@@ -269,6 +272,8 @@ class APIClient {
   async submit(url: string): Promise<SubmitResponse> {
     return this.fetch<SubmitResponse>('/submit', {
       method: 'POST',
+      timeout: false, // Disable Bun's shorter socket idle timeout; Node ignores this option.
+      signal: AbortSignal.timeout(SUBMIT_TIMEOUT_MS),
       body: JSON.stringify({ url }),
     });
   }
