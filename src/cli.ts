@@ -178,11 +178,17 @@ function toAgentOutput(agent: AgentType): { id: AgentType; name: string } {
   };
 }
 
-function printJson(payload: unknown): void {
-  console.log(JSON.stringify(payload, null, 2));
+function printJson(payload: unknown): Promise<void> {
+  // A pipe may accept only part of a large envelope before the command exits.
+  return new Promise((resolve, reject) => {
+    process.stdout.write(JSON.stringify(payload, null, 2) + '\n', (error) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
 }
 
-function printJsonError(code: string, message: string, details?: unknown): never {
+async function printJsonError(code: string, message: string, details?: unknown): Promise<void> {
   const payload: JsonErrorPayload = {
     ok: false,
     error: {
@@ -191,8 +197,8 @@ function printJsonError(code: string, message: string, details?: unknown): never
       details,
     },
   };
-  printJson(payload);
-  process.exit(1);
+  process.exitCode = 1;
+  await printJson(payload);
 }
 
 function parseAgentOptionValues(args: string[], startIndex: number): { values: string[]; nextIndex: number } {
@@ -696,11 +702,11 @@ async function shouldPreserveExistingLockForCanonicalRelink(
 
 async function runInstallJson(skillName: string, options: InstallOptions): Promise<void> {
   if (options.skillOptionMissing) {
-    printJsonError('MISSING_SKILL_OPTION_VALUE', '--skill requires a value');
+    return printJsonError('MISSING_SKILL_OPTION_VALUE', '--skill requires a value');
   }
 
   if (!skillName) {
-    printJsonError('MISSING_SKILL', 'Missing skill identifier');
+    return printJsonError('MISSING_SKILL', 'Missing skill identifier');
   }
 
   const spinner = createSpinner(true);
@@ -714,7 +720,7 @@ async function runInstallJson(skillName: string, options: InstallOptions): Promi
   try {
     if (discoveredSkills.length === 0) {
       if (requestedSkill) {
-        printJson({
+        await printJson({
           ok: false,
           error: {
             code: 'SKILL_NOT_FOUND',
@@ -729,7 +735,7 @@ async function runInstallJson(skillName: string, options: InstallOptions): Promi
         return;
       }
 
-      printJson({
+      await printJson({
         ok: true,
         action: options.list ? 'preview' : 'install',
         source: {
@@ -750,7 +756,7 @@ async function runInstallJson(skillName: string, options: InstallOptions): Promi
     }
 
     if (options.list) {
-      printJson({
+      await printJson({
         ok: true,
         action: 'preview',
         source: {
@@ -780,7 +786,7 @@ async function runInstallJson(skillName: string, options: InstallOptions): Promi
     if (discoveredSkills.length === 1 || options.yes || options.all || sourceParsed.type === 'collection') {
       skillsToInstall = discoveredSkills;
     } else {
-      printJson({
+      await printJson({
         ok: false,
         error: {
           code: 'MULTIPLE_SKILLS_REQUIRE_SELECTION',
@@ -797,7 +803,7 @@ async function runInstallJson(skillName: string, options: InstallOptions): Promi
 
     const { targetAgents: specifiedAgents, invalidAgents } = resolveValidatedAgents(options.agent);
     if (invalidAgents.length > 0) {
-      printJson({
+      await printJson({
         ok: false,
         error: {
           code: 'INVALID_AGENTS',
@@ -835,7 +841,7 @@ async function runInstallJson(skillName: string, options: InstallOptions): Promi
     }
 
     if (targetAgents.length === 0) {
-      printJson({
+      await printJson({
         ok: false,
         error: {
           code: 'NO_TARGET_AGENTS',
@@ -1007,7 +1013,7 @@ async function runInstallJson(skillName: string, options: InstallOptions): Promi
     const mainSkills = successful.filter((result) => !result.isDependency);
     const dependencySkills = successful.filter((result) => result.isDependency);
 
-    printJson({
+    await printJson({
       ok: failed.length === 0,
       action: 'install',
       source: {
@@ -1059,7 +1065,7 @@ async function runInstall(args: string[]): Promise<void> {
   const { skillName, options } = parseInstallOptions(args);
   if (options.skillOptionMissing) {
     if (options.json) {
-      printJsonError('MISSING_SKILL_OPTION_VALUE', '--skill requires a value');
+      return printJsonError('MISSING_SKILL_OPTION_VALUE', '--skill requires a value');
     }
 
     console.log(`${RED}Error: --skill requires a value${RESET}`);
@@ -1845,7 +1851,7 @@ async function runSearch(args: string[]): Promise<void> {
     parsedOptions = parseSearchOptions(args);
   } catch (error) {
     if (args.includes('--json')) {
-      printJsonError('INVALID_OPTIONS', error instanceof Error ? error.message : 'Invalid search options');
+      return printJsonError('INVALID_OPTIONS', error instanceof Error ? error.message : 'Invalid search options');
     }
     console.log(`${RED}Error: ${error instanceof Error ? error.message : 'Invalid search options'}${RESET}`);
     process.exit(1);
@@ -1913,7 +1919,7 @@ async function runSearch(args: string[]): Promise<void> {
     });
 
     if (json) {
-      printJson({
+      await printJson({
         ok: true,
         query,
         filters: {
@@ -1983,7 +1989,7 @@ async function runSearch(args: string[]): Promise<void> {
   } catch (error) {
     spinner.stop('Search failed');
     if (json) {
-      printJsonError('SEARCH_FAILED', error instanceof Error ? error.message : 'Search failed');
+      return printJsonError('SEARCH_FAILED', error instanceof Error ? error.message : 'Search failed');
     }
 
     if (error instanceof Error) {
@@ -2126,7 +2132,7 @@ async function runList(args: string[]): Promise<void> {
 
   if (options.global && options.project) {
     if (options.json) {
-      printJsonError('INVALID_OPTIONS', 'Cannot use --global and --project together');
+      return printJsonError('INVALID_OPTIONS', 'Cannot use --global and --project together');
     }
     console.log(`${RED}Error: Cannot use --global and --project together${RESET}`);
     process.exit(1);
@@ -2135,7 +2141,7 @@ async function runList(args: string[]): Promise<void> {
   const { targetAgents, invalidAgents } = resolveValidatedAgents(options.agents);
   if (invalidAgents.length > 0) {
     if (options.json) {
-      printJsonError('INVALID_AGENTS', 'Invalid agents provided', { invalidAgents });
+      return printJsonError('INVALID_AGENTS', 'Invalid agents provided', { invalidAgents });
     }
     p.log.error(`Invalid agents: ${invalidAgents.join(', ')}`);
     return;
@@ -2188,7 +2194,7 @@ async function runList(args: string[]): Promise<void> {
       skills: listSkills,
     };
 
-    printJson(payload);
+    await printJson(payload);
     return;
   }
 
@@ -2267,7 +2273,7 @@ async function runRemove(args: string[]): Promise<void> {
 
   if (!skillName) {
     if (options.json) {
-      printJsonError('MISSING_SKILL', 'Missing skill name');
+      return printJsonError('MISSING_SKILL', 'Missing skill name');
     }
     console.log(`${RED}Error: Missing skill name${RESET}`);
     console.log(`Usage: askill remove <skill-or-path>`);
@@ -2277,7 +2283,7 @@ async function runRemove(args: string[]): Promise<void> {
   const { targetAgents: scopedAgents, invalidAgents } = resolveValidatedAgents(options.agents);
   if (invalidAgents.length > 0) {
     if (options.json) {
-      printJsonError('INVALID_AGENTS', 'Invalid agents provided', { invalidAgents });
+      return printJsonError('INVALID_AGENTS', 'Invalid agents provided', { invalidAgents });
     }
     p.log.error(`Invalid agents: ${invalidAgents.join(', ')}`);
     return;
@@ -2313,7 +2319,7 @@ async function runRemove(args: string[]): Promise<void> {
       : notFoundMessage;
 
     if (options.json) {
-      printJson({
+      await printJson({
         ok: false,
         skill: skillName,
         scope: isGlobal ? 'global' : 'project',
@@ -2357,7 +2363,7 @@ async function runRemove(args: string[]): Promise<void> {
         });
 
         if (options.json) {
-          printJson({
+          await printJson({
             ok: true,
             skill: resolvedSkillName,
             scope: effectiveGlobalScope ? 'global' : 'project',
@@ -2375,7 +2381,7 @@ async function runRemove(args: string[]): Promise<void> {
       }
 
       if (options.json) {
-        printJson({
+        await printJson({
           ok: false,
           skill: resolvedSkillName,
           scope: effectiveGlobalScope ? 'global' : 'project',
@@ -2398,7 +2404,7 @@ async function runRemove(args: string[]): Promise<void> {
 
     if (options.json) {
       const notFoundForRequestedAgentsMessage = `Skill "${resolvedSkillName}" not found for requested agents`;
-      printJson({
+      await printJson({
         ok: false,
         skill: resolvedSkillName,
         scope: effectiveGlobalScope ? 'global' : 'project',
@@ -2459,7 +2465,7 @@ async function runRemove(args: string[]): Promise<void> {
 
   if (options.json) {
     const skippedAgents = installedAgents.filter((agent) => !agentsWithSkill.includes(agent));
-    printJson({
+    await printJson({
       ok: failedRemovals.length === 0,
       skill: resolvedSkillName,
       scope: effectiveGlobalScope ? 'global' : 'project',
@@ -2554,7 +2560,7 @@ async function runInfo(args: string[]): Promise<void> {
 
   if (!inputTarget) {
     if (options.json) {
-      printJsonError('MISSING_SKILL', 'Missing skill name');
+      return printJsonError('MISSING_SKILL', 'Missing skill name');
     }
     console.log(`${RED}Error: Missing skill name${RESET}`);
     console.log(`Usage: askill info <skill-name>`);
@@ -2587,7 +2593,7 @@ async function runInfo(args: string[]): Promise<void> {
     const installSource = installSourceFromRegistrySkill(skill, displayName);
 
     if (options.json) {
-      printJson({
+      await printJson({
         ok: true,
         skill: {
           id: skill.id,
@@ -2662,7 +2668,7 @@ async function runInfo(args: string[]): Promise<void> {
     if (error instanceof APIError && error.status === 404) {
       spinner.stop(pc.red('Not found'));
       if (options.json) {
-        printJsonError('SKILL_NOT_FOUND', `Skill "${skillName}" not found`);
+        return printJsonError('SKILL_NOT_FOUND', `Skill "${skillName}" not found`);
       }
       p.outro(pc.red(`Skill "${skillName}" not found`));
       process.exit(1);
@@ -3028,7 +3034,7 @@ async function runCheck(args: string[]): Promise<void> {
   const lockOptions = { global: options.global };
 
   if (options.json) {
-    printJson(await buildCheckPayload(options));
+    await printJson(await buildCheckPayload(options));
     return;
   }
 
@@ -3353,7 +3359,7 @@ async function runUpdateJson(options: ScopedSkillOptions): Promise<void> {
   const failed = results.filter((result) => result.status === 'failed').length;
   const updated = results.filter((result) => result.status === 'updated').length;
 
-  printJson({
+  await printJson({
     ok: failed === 0,
     action: 'update',
     scope: checkPayload.scope,
@@ -4427,20 +4433,11 @@ async function main(): Promise<void> {
 }
 
 main().catch((error) => {
-  const jsonMode = process.argv.slice(2).includes('--json');
-  if (jsonMode) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    printJson({
-      ok: false,
-      error: {
-        code: 'UNHANDLED_ERROR',
-        message: errorMessage,
-      },
-    });
-    process.exit(1);
+  const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+  if (process.argv.slice(2).includes('--json')) {
+    return printJsonError('UNHANDLED_ERROR', errorMessage);
   }
 
-  const errorMessage = error instanceof Error ? error.message : 'Unknown error';
   console.error(`${RED}Error: ${errorMessage}${RESET}`);
   process.exit(1);
 });
