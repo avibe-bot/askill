@@ -1,6 +1,6 @@
 {
   "name": "askill-cli",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "description": "askill - The Agent Skill Package Manager",
   "type": "module",
   "bin": {
